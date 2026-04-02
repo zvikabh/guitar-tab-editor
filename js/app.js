@@ -50,6 +50,7 @@ class App {
       fingerpick: new FingerpickEditMode(this),
     };
     this.activeMode = this.modes.fingerpick;
+    this._previousModeName = null; // for returning from raw mode via Escape
 
     // Click handler for the editor
     editorEl.addEventListener('click', (event) => this._onEditorClick(event));
@@ -315,7 +316,74 @@ class App {
     document.getElementById('tab-editor')?.focus();
   }
 
+  /**
+   * Return from raw mode to the previous mode (triggered by Escape).
+   */
+  returnFromRawMode() {
+    if (this._previousModeName && this.modes[this._previousModeName]) {
+      this.setMode(this._previousModeName);
+      // Update the radio button
+      const capName = this._previousModeName.charAt(0).toUpperCase() + this._previousModeName.slice(1);
+      const radio = document.getElementById(`mode${capName}`);
+      if (radio) radio.checked = true;
+      this._previousModeName = null;
+    }
+  }
+
   // --- Private ---
+
+  /**
+   * Switch to raw mode for text editing, remembering the current mode.
+   * Positions cursor at the click location in the flat text.
+   * @param {number} blockIndex - Block that was clicked
+   * @param {number} lineInBlock - Line index within the block's DOM rendering
+   * @param {number} charIdx - Character index within the line
+   */
+  _switchToRawForTextEdit(blockIndex, lineInBlock, charIdx) {
+    if (this.activeMode.name === 'raw') return;
+
+    // Remember current mode so Escape can return to it
+    this._previousModeName = this.activeMode.name;
+
+    // Compute the flat line index BEFORE switching to raw mode.
+    // Count lines in all blocks before the clicked block, then add the line offset.
+    let flatLine = 0;
+    for (let b = 0; b < this.document.blocks.length; b++) {
+      const blk = this.document.blocks[b];
+      const blockLineCount = this._countBlockLines(blk);
+      if (b === blockIndex) {
+        flatLine += lineInBlock;
+        break;
+      }
+      flatLine += blockLineCount;
+    }
+
+    // Switch to raw mode (this flattens the document into _lines)
+    this.setMode('raw');
+
+    const radio = document.getElementById('modeRaw');
+    if (radio) radio.checked = true;
+
+    // Position cursor at the computed flat line and character
+    if (this.activeMode._lines) {
+      const lineIdx = Math.min(flatLine, this.activeMode._lines.length - 1);
+      this.cursor.lineIndex = lineIdx;
+      this.cursor.charIndex = Math.min(charIdx, (this.activeMode._lines[lineIdx] || '').length);
+      this.activeMode._updateCursorDisplay();
+    }
+  }
+
+  /**
+   * Count how many rendered lines a block produces.
+   */
+  _countBlockLines(block) {
+    if (block.type === 'text') {
+      return block.lines.length;
+    } else if (block.type === 'tabrow') {
+      return block.preLines.length + 6 + block.postLines.length;
+    }
+    return 0;
+  }
 
   _createNewDocument() {
     const emptyTabRow = createTabRowBlock({
@@ -351,9 +419,10 @@ class App {
     const block = this.document.blocks[target.blockIndex];
 
     if (block.type === 'text' || target.lineType === 'pre' || target.lineType === 'post') {
-      // Clicking on text/pre/post in note mode: just set cursor position
-      this.cursor.lineIndex = target.lineIndex;
-      this.cursor.charIndex = this.cursor.clickToCharIndex(target.lineEl, event.clientX);
+      // Clicking on text/pre/post: switch to raw mode to edit it
+      const clickCharIdx = this.cursor.clickToCharIndex(target.lineEl, event.clientX);
+      this._switchToRawForTextEdit(target.blockIndex, target.lineIndex, clickCharIdx);
+      return;
     } else if (target.lineType === 'tab' && block.type === 'tabrow') {
       // Clicking on a tab line in note/fingerpick mode
       const charIdx = this.cursor.clickToCharIndex(target.lineEl, event.clientX);

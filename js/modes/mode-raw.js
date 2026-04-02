@@ -154,6 +154,14 @@ export class RawEditMode {
         this._insertNewline();
         break;
 
+      case 'Escape':
+        event.preventDefault();
+        // Return to previous mode if we entered raw mode via text click
+        if (this.app._previousModeName) {
+          this.app.returnFromRawMode();
+        }
+        break;
+
       default:
         if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
           event.preventDefault();

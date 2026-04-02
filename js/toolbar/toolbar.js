@@ -20,24 +20,35 @@ export class Toolbar {
 
   _initTooltips() {
     const tips = {
+      modeRaw: 'Raw Edit — edit as plain text',
+      modeNote: 'Note Edit — click frets to add notes',
+      modeFingerpick: 'Fingerpick Edit — select chord, then pluck strings',
       btnOpen: `Open File (${shortcutLabel('O')})`,
       btnSave: `Save File (${shortcutLabel('S')})`,
       btnUndo: `Undo (${shortcutLabel('Z')})`,
       btnRedo: `Redo (${shortcutLabel('Shift+Z')})`,
-      btnRest: 'Add Rest (Space)',
+      len16: 'Sixteenth note (1/16)',
+      len8: 'Eighth note (1/8)',
+      len4: 'Quarter note (1/4)',
+      len2: 'Half note (1/2)',
       btnBar: 'Add Bar Line',
-      btnRepeatStart: 'Add Repeat Start |:',
-      btnRepeatEnd: 'Add Repeat End :|',
-      btnChord: 'Chord Mode (Shift+Click)',
+      btnRepeatStart: 'Add Repeat Start ‖:',
+      btnRepeatEnd: 'Add Repeat End :‖',
+      btnRest: 'Add Rest (Space)',
+      btnChord: 'Chord Mode — add multiple notes at same position (Shift+Click)',
     };
 
     for (const [id, tip] of Object.entries(tips)) {
-      const el = document.getElementById(id);
-      if (el) {
-        el.title = tip;
-        el.setAttribute('data-bs-toggle', 'tooltip');
-        el.setAttribute('data-bs-placement', 'bottom');
+      let el = document.getElementById(id);
+      if (!el) continue;
+      // For radio inputs, put tooltip on the label instead
+      if (el.tagName === 'INPUT' && el.type === 'radio') {
+        el = document.querySelector(`label[for="${id}"]`);
+        if (!el) continue;
       }
+      el.title = tip;
+      el.setAttribute('data-bs-toggle', 'tooltip');
+      el.setAttribute('data-bs-placement', 'bottom');
     }
 
     // Initialize Bootstrap tooltips
