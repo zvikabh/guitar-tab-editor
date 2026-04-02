@@ -216,6 +216,7 @@ export class FingerpickPanel {
     }
 
     // Clickable areas per string (full width, covers dots)
+    // Left-click: insert note. Right-click: modify chord voicing.
     for (let s = 0; s < 6; s++) {
       const y = topPad + s * stringSpacing;
       const clickArea = document.createElementNS(svgNS, 'rect');
@@ -226,6 +227,10 @@ export class FingerpickPanel {
       clickArea.setAttribute('fill', 'transparent');
       clickArea.setAttribute('cursor', 'pointer');
       clickArea.addEventListener('click', (e) => this._onStringClick(s, e));
+      clickArea.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._onStringRightClick(s, e);
+      });
       svg.appendChild(clickArea);
     }
 
@@ -252,6 +257,9 @@ export class FingerpickPanel {
     markersGroup.setAttribute('class', 'chord-markers');
     markersGroup.setAttribute('pointer-events', 'none');
     svg.appendChild(markersGroup);
+
+    // Prevent default context menu on the diagram
+    svg.addEventListener('contextmenu', (e) => e.preventDefault());
 
     this._diagramSvg = svg;
     this._dotsGroup = dotsGroup;
@@ -291,6 +299,80 @@ export class FingerpickPanel {
 
     // Refocus editor so keyboard shortcuts (1-6, arrows, etc.) work immediately
     document.getElementById('tab-editor')?.focus();
+  }
+
+  /**
+   * Right-click on the chord diagram to modify the chord voicing for a string.
+   * - Click on a fret position: set that string to that fret
+   * - Click on the existing fret dot: set to open (0)
+   * - Click on the open circle: set to muted (null)
+   * - Click on the muted X: set to open (0)
+   */
+  _onStringRightClick(stringIdx, event) {
+    if (!this.activeChord) {
+      this._showMessage('Select a chord first.');
+      return;
+    }
+
+    const { fretSpacing, leftPad, numFrets } = this._diagramParams;
+    const svgRect = this._diagramSvg.getBoundingClientRect();
+    const clickX = event.clientX - svgRect.left;
+
+    const currentFret = this.activeChord.frets[stringIdx];
+
+    // Determine what was clicked based on X position
+    if (clickX < leftPad) {
+      // Clicked in the open/muted marker area (left of nut)
+      if (currentFret === null) {
+        // Muted → open
+        this.activeChord.frets[stringIdx] = 0;
+      } else if (currentFret === 0) {
+        // Open → muted
+        this.activeChord.frets[stringIdx] = null;
+      } else {
+        // Has a fret → open
+        this.activeChord.frets[stringIdx] = 0;
+      }
+    } else {
+      // Clicked on the fretboard — determine which fret
+      const relX = clickX - leftPad;
+
+      // Compute fret offset (for higher chords)
+      const playedFrets = this.activeChord.frets.filter(f => f !== null && f > 0);
+      const maxFret = playedFrets.length > 0 ? Math.max(...playedFrets) : 1;
+      const minFret = playedFrets.length > 0 ? Math.min(...playedFrets) : 1;
+      const offset = maxFret <= numFrets ? 0 : minFret - 1;
+
+      const clickedDisplayFret = Math.round(relX / fretSpacing + 0.5);
+      const clickedFret = clickedDisplayFret + offset;
+
+      if (clickedFret < 1 || clickedFret > 24) return;
+
+      if (currentFret === clickedFret) {
+        // Clicked on the existing fret → set to open
+        this.activeChord.frets[stringIdx] = 0;
+      } else {
+        // Set to the clicked fret
+        this.activeChord.frets[stringIdx] = clickedFret;
+      }
+    }
+
+    // Update the chord in the database (so it persists for this session)
+    if (CHORD_DB[this.activeChord.name]) {
+      CHORD_DB[this.activeChord.name].frets = [...this.activeChord.frets];
+    }
+
+    // Refresh the diagram
+    this._updateMiniDiagram();
+
+    // Update the chord name display to show it's modified
+    const nameEl = this.containerEl.querySelector('#activeChordName');
+    if (nameEl) {
+      const name = this.activeChord.name;
+      if (!nameEl.textContent.endsWith('*')) {
+        nameEl.textContent = name + '*';
+      }
+    }
   }
 
   _onStringClick(stringIdx, event) {
