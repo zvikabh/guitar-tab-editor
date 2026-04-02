@@ -113,16 +113,23 @@ export function detectTabRow(lines, startIdx) {
  * @returns {{ content: string, annotation: string }}
  */
 export function extractRightAnnotation(line) {
-  // Check for text after final |
+  // Check for text after final | (ASCII pipe)
   const lastPipe = line.lastIndexOf('|');
   if (lastPipe !== -1) {
     const afterPipe = line.substring(lastPipe + 1);
     if (afterPipe.trim() !== '') {
-      // There is text after the last pipe — that's the annotation
-      return {
-        content: line.substring(0, lastPipe + 1),
-        annotation: afterPipe.trimStart(),
-      };
+      // Annotations are separated from the tab by leading whitespace (e.g., "| x2").
+      // Tab content directly follows the pipe with no space (e.g., "|-3---").
+      // So: if afterPipe starts with a space, it's an annotation.
+      // If it starts with a tab character (dash, digit, colon, ‖), it's content.
+      if (/^\s/.test(afterPipe)) {
+        return {
+          content: line.substring(0, lastPipe + 1),
+          annotation: afterPipe.trimStart(),
+        };
+      }
+      // Starts with tab content character — it's part of the tab, not an annotation
+      return { content: line, annotation: '' };
     }
     // Trailing pipe with nothing after — content includes the pipe
     return { content: line, annotation: '' };

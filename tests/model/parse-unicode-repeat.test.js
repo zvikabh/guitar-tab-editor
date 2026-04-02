@@ -72,4 +72,26 @@ describe('Parse file with unicode repeat markers', () => {
     const text = renderDocument(doc);
     expect(text).toBe(input);
   });
+
+  test('no extraneous space before last bar in Good Riddance second row', () => {
+    const input =
+      '   G                                   Cadd9             D          \n' +
+      'e‖:-----------------|-----------------|-----------------|-----------------:‖\n' +
+      'B‖:-------3---------|-------3---------|-------3---------|-------3---------:‖\n' +
+      'G‖:---------0---0---|---------0---0---|---------0---0---|-----2---2---0---:‖\n' +
+      'D‖:-----------0-----|-----0-----0-----|-----2-----2-----|-0---------0-----:‖\n' +
+      'A‖:-----------------|-----------------|-3---------------|-----------------:‖\n' +
+      'E‖:-3---3-----------|-3---------------|-----------------|-----------------:‖\n';
+
+    const doc = parseTabText(input);
+    const text = renderDocument(doc);
+
+    // Should roundtrip exactly — no extraneous spaces
+    expect(text).toBe(input);
+
+    // Specifically check no space before the last bar section
+    const eLine = text.split('\n').find(l => l.startsWith('e'));
+    expect(eLine).not.toContain('| -');
+    expect(eLine).not.toContain('| ');
+  });
 });
