@@ -144,7 +144,10 @@ export class Editor {
         lineEl.dataset.lineType = 'tab';
         lineEl.dataset.string = s;
 
-        let text = `${block.labels[s]}|${block.strings[s]}`;
+        // Skip the | separator if content starts with a repeat marker (‖: or :‖)
+        const content = block.strings[s];
+        const sep = (content.startsWith('‖:') || content.startsWith(':‖')) ? '' : '|';
+        let text = `${block.labels[s]}${sep}${content}`;
         if (block.rightAnnotations[s]) {
           text += ` ${block.rightAnnotations[s]}`;
         }

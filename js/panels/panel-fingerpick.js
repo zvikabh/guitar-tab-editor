@@ -203,13 +203,20 @@ export class FingerpickPanel {
     }
 
     // Draw fret lines (vertical)
+    const nutExtend = 5; // nut extends past top and bottom strings
     for (let f = 0; f <= NUM_FRETS_SHOWN; f++) {
       const x = leftPad + f * fretSpacing;
       const line = document.createElementNS(svgNS, 'line');
       line.setAttribute('x1', x);
       line.setAttribute('x2', x);
-      line.setAttribute('y1', topPad);
-      line.setAttribute('y2', topPad + 5 * stringSpacing);
+      if (f === 0) {
+        // Nut extends past the strings
+        line.setAttribute('y1', topPad - nutExtend);
+        line.setAttribute('y2', topPad + 5 * stringSpacing + nutExtend);
+      } else {
+        line.setAttribute('y1', topPad);
+        line.setAttribute('y2', topPad + 5 * stringSpacing);
+      }
       line.setAttribute('stroke', f === 0 ? '#333' : '#bbb');
       line.setAttribute('stroke-width', f === 0 ? 3 : 1);
       svg.appendChild(line);

@@ -267,8 +267,21 @@ class App {
     document.getElementById('tab-editor')?.focus();
   }
 
-  insertRepeatStart() { /* TODO */ document.getElementById('tab-editor')?.focus(); }
-  insertRepeatEnd() { /* TODO */ document.getElementById('tab-editor')?.focus(); }
+  insertRepeatStart() {
+    if (this.activeMode.name !== 'raw' && this.ensureCursorOnTabRow()) {
+      const mode = this.getActiveMode();
+      if (mode._insertRepeatStartAtCursor) mode._insertRepeatStartAtCursor();
+    }
+    document.getElementById('tab-editor')?.focus();
+  }
+
+  insertRepeatEnd() {
+    if (this.activeMode.name !== 'raw' && this.ensureCursorOnTabRow()) {
+      const mode = this.getActiveMode();
+      if (mode._insertRepeatEndAtCursor) mode._insertRepeatEndAtCursor();
+    }
+    document.getElementById('tab-editor')?.focus();
+  }
 
   insertRest() {
     if (this.activeMode.name !== 'raw' && this.ensureCursorOnTabRow()) {

@@ -13,6 +13,8 @@ import {
   insertNote,
   deleteNote,
   insertBarline,
+  insertRepeatStart,
+  insertRepeatEnd,
   removeBarline,
   splitTabRow,
   syncStringsFromColumns,
@@ -237,6 +239,40 @@ export class BaseTabEditMode {
     this._refreshAfterEdit();
   }
 
+  _insertRepeatStartAtCursor() {
+    const cursor = this.app.cursor;
+    const block = this.app.document.blocks[cursor.blockIndex];
+    if (!block || block.type !== 'tabrow') return;
+
+    this._pushUndoSnapshot();
+    ensureColumns(block);
+    // Repeat start always goes at the beginning of the row
+    const colIdx = 0;
+    insertRepeatStart(block, colIdx);
+    // Position cursor just after the repeat-start (on the rest, so next note consumes it)
+    cursor.columnIndex = colIdx + 1;
+    this._syncCursorCharFromColumn();
+    this._refreshAfterEdit();
+  }
+
+  _insertRepeatEndAtCursor() {
+    const cursor = this.app.cursor;
+    const block = this.app.document.blocks[cursor.blockIndex];
+    if (!block || block.type !== 'tabrow') return;
+
+    this._pushUndoSnapshot();
+    ensureColumns(block);
+    // Repeat end always goes at the end of the row (replaces closing bar)
+    const colIdx = block.columns.length;
+    insertRepeatEnd(block, colIdx);
+    cursor.columnIndex = colIdx + 1;
+    while (cursor.columnIndex < block.columns.length && block.columns[cursor.columnIndex].type === 'rest') {
+      cursor.columnIndex++;
+    }
+    this._syncCursorCharFromColumn();
+    this._refreshAfterEdit();
+  }
+
   // --- Cursor movement ---
 
   _moveCursorLeft() {
@@ -433,28 +469,29 @@ export class BaseTabEditMode {
 
     const [block1, block2] = splitTabRow(block, splitIdx);
 
-    // Ensure block1 ends with exactly one closing bar.
-    // Strip trailing bars (and rests that are between bars), but keep
-    // rests that are note spacing (immediately after a note).
+    // Ensure block1 ends with a closing delimiter (bar, repeat-end, or repeat-start).
+    // Strip trailing plain bars (and rests between bars), but keep repeat markers and note spacing.
     ensureColumns(block1);
     while (block1.columns.length > 0) {
       const last = block1.columns[block1.columns.length - 1];
       if (last.type === 'bar') {
         block1.columns.pop();
       } else if (last.type === 'rest') {
-        // Only strip if preceded by a bar (padding rest between bars)
         const prev = block1.columns.length >= 2 ? block1.columns[block1.columns.length - 2] : null;
         if (prev && prev.type === 'bar') {
           block1.columns.pop();
         } else {
-          break; // This rest follows a note — keep it
+          break;
         }
       } else {
         break;
       }
     }
-    // Add exactly one closing bar
-    insertBarline(block1, block1.columns.length);
+    // Add a closing bar only if block1 doesn't already end with a bar-like delimiter
+    const lastCol1 = block1.columns.length > 0 ? block1.columns[block1.columns.length - 1] : null;
+    if (!lastCol1 || (lastCol1.type !== 'bar' && lastCol1.type !== 'repeat-end' && lastCol1.type !== 'repeat-start')) {
+      insertBarline(block1, block1.columns.length);
+    }
     syncStringsFromColumns(block1);
 
     // Do NOT add an opening bar to block2 — the renderer prepends "label|"

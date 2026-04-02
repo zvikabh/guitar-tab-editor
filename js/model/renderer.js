@@ -43,7 +43,13 @@ function renderTabRowBlock(block, outputLines) {
     const content = block.strings[i];
     const annotation = block.rightAnnotations[i] || '';
 
-    let line = `${label}|${content}`;
+    // Use label| as prefix, but if content starts with a repeat marker (‖: or :|),
+    // skip the | to avoid e|‖: — just use e‖: instead.
+    let separator = '|';
+    if (content.startsWith('‖:') || content.startsWith(':‖')) {
+      separator = '';
+    }
+    let line = `${label}${separator}${content}`;
     if (annotation) {
       line += ` ${annotation}`;
     }

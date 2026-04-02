@@ -12,7 +12,7 @@ export const STANDARD_STRING_LABELS = ['e', 'B', 'G', 'D', 'A', 'E'];
  * Captures: (1) label, (2) rest of line
  * Supports alternate tunings — any letter a-g/A-G with optional #/b/♭/♯.
  */
-const LABELED_TAB_RE = /^([a-gA-G][#b♭♯]?)\|(.*)$/;
+const LABELED_TAB_RE = /^([a-gA-G][#b♭♯]?)([|‖])(.*)$/;
 
 /**
  * Regex matching an unlabeled tab line: starts with | and contains primarily tab characters.
@@ -32,7 +32,11 @@ const TAB_CONTENT_CHARS = /^[-0-9|:hpbsrvx/\\~.\s]+$/;
 export function parseLabeledTabLine(line) {
   const m = line.match(LABELED_TAB_RE);
   if (!m) return null;
-  return { label: m[1], content: m[2] };
+  // If separator is ‖, it's part of a repeat marker — include it in content
+  const separator = m[2];
+  const rawContent = m[3];
+  const content = separator === '‖' ? '‖' + rawContent : rawContent;
+  return { label: m[1], content };
 }
 
 /**

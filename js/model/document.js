@@ -105,7 +105,28 @@ export function parseColumns(strings) {
     // Check what's at this position across all strings
     const chars = strings.map(s => s[pos] || '-');
 
-    // Bar line or repeat marker
+    // Check for ‖: (unicode repeat-start) or :‖ (unicode repeat-end)
+    if (chars.some(c => c === '‖')) {
+      const nextChars = strings.map(s => s[pos + 1] || '');
+      const prevChars = pos > 0 ? strings.map(s => s[pos - 1] || '') : strings.map(() => '');
+
+      if (nextChars.some(c => c === ':')) {
+        columns.push({ position: pos, width: 2, notes: [null,null,null,null,null,null], type: 'repeat-start' });
+        pos += 2;
+        continue;
+      }
+      if (prevChars.some(c => c === ':')) {
+        columns.push({ position: pos, width: 1, notes: [null,null,null,null,null,null], type: 'repeat-end' });
+        pos++;
+        continue;
+      }
+      // Standalone ‖ — treat as bar
+      columns.push({ position: pos, width: 1, notes: [null,null,null,null,null,null], type: 'bar' });
+      pos++;
+      continue;
+    }
+
+    // Bar line or repeat marker (ASCII |)
     if (chars.every(c => c === '|' || c === ':' || c === '-') && chars.some(c => c === '|')) {
       // Look ahead for repeat patterns
       const nextChars = strings.map(s => s[pos + 1] || '');
@@ -152,9 +173,16 @@ export function parseColumns(strings) {
       continue;
     }
 
-    // Colon at this position (partial repeat sign) — part of repeat
+    // Colon at this position — check for :‖ repeat-end
     if (chars.some(c => c === ':') && chars.every(c => c === ':' || c === '-')) {
-      // Standalone colon column — skip, it's a repeat marker continuation
+      const nextChars = strings.map(s => s[pos + 1] || '');
+      if (nextChars.some(c => c === '‖')) {
+        // :‖ repeat end — consume both characters
+        columns.push({ position: pos, width: 2, notes: [null,null,null,null,null,null], type: 'repeat-end' });
+        pos += 2;
+        continue;
+      }
+      // Standalone colon — skip, it's a repeat marker continuation
       pos++;
       continue;
     }
@@ -275,9 +303,9 @@ export function columnsToStrings(columns) {
     if (col.type === 'bar') {
       for (let s = 0; s < 6; s++) lines[s] += '|';
     } else if (col.type === 'repeat-start') {
-      for (let s = 0; s < 6; s++) lines[s] += '|:';
+      for (let s = 0; s < 6; s++) lines[s] += '‖:';
     } else if (col.type === 'repeat-end') {
-      for (let s = 0; s < 6; s++) lines[s] += ':|';
+      for (let s = 0; s < 6; s++) lines[s] += ':‖';
     } else if (col.type === 'rest') {
       // Rest columns: use stored width for spacing
       const w = col.width || 1;
@@ -512,6 +540,72 @@ export function insertBarline(block, colIdx) {
 
   syncStringsFromColumns(block);
 
+  return { colIdx };
+}
+
+/**
+ * Insert a repeat-start marker (‖:) at the given column index.
+ * If inserting at a plain bar, replaces it.
+ */
+export function insertRepeatStart(block, colIdx) {
+  ensureColumns(block);
+
+  const repeatCol = {
+    position: 0, width: 2,
+    notes: [null, null, null, null, null, null], type: 'repeat-start',
+  };
+
+  // If the column at colIdx is a plain bar, replace it
+  if (colIdx < block.columns.length && block.columns[colIdx].type === 'bar') {
+    block.columns.splice(colIdx, 1, repeatCol);
+  } else {
+    block.columns.splice(colIdx, 0, repeatCol);
+  }
+
+  // Padding rest after if needed
+  const newAfter = colIdx + 1;
+  if (newAfter < block.columns.length && block.columns[newAfter].type !== 'rest') {
+    block.columns.splice(newAfter, 0, {
+      position: 0, width: 1,
+      notes: [null, null, null, null, null, null], type: 'rest',
+    });
+  }
+  syncStringsFromColumns(block);
+  return { colIdx };
+}
+
+/**
+ * Insert a repeat-end marker (:‖) at the given column index.
+ * If inserting at or just before a plain closing bar, replaces it.
+ */
+export function insertRepeatEnd(block, colIdx) {
+  ensureColumns(block);
+
+  const repeatCol = {
+    position: 0, width: 2,
+    notes: [null, null, null, null, null, null], type: 'repeat-end',
+  };
+
+  // If the column at colIdx is a plain bar, replace it
+  if (colIdx < block.columns.length && block.columns[colIdx].type === 'bar') {
+    block.columns.splice(colIdx, 1, repeatCol);
+  } else if (colIdx >= block.columns.length && block.columns.length > 0 &&
+             block.columns[block.columns.length - 1].type === 'bar') {
+    // At end of row — replace the closing bar
+    block.columns.splice(block.columns.length - 1, 1, repeatCol);
+  } else {
+    block.columns.splice(colIdx, 0, repeatCol);
+  }
+
+  // Padding rest after if needed
+  const newAfter = colIdx + 1;
+  if (newAfter < block.columns.length && block.columns[newAfter].type !== 'rest') {
+    block.columns.splice(newAfter, 0, {
+      position: 0, width: 1,
+      notes: [null, null, null, null, null, null], type: 'rest',
+    });
+  }
+  syncStringsFromColumns(block);
   return { colIdx };
 }
 
