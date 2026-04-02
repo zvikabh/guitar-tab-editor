@@ -183,6 +183,61 @@ describe('Add Repeat End then Enter: no extra | after :‖', () => {
   });
 });
 
+describe('Click past end of empty row then insert note', () => {
+  test('exact output: click past end, select D, press 4', () => {
+    const block = createTabRowBlock({
+      strings: ['---|', '---|', '---|', '---|', '---|', '---|'],
+    });
+    const doc = createDocument([createTextBlock(['']), block]);
+
+    const app = {
+      document: doc,
+      undoManager: new UndoManager(),
+      noteLength: '1/8',
+      chordMode: false,
+      timeSigEnabled: false,
+      timeSigBeats: 4,
+      timeSigBeatValue: 4,
+      cursor: {
+        blockIndex: 1, columnIndex: 0, charIndex: 0, stringIndex: 0, lineIndex: 0,
+        getState() { return { ...this }; },
+        setState(s) { Object.assign(this, s); },
+      },
+      editor: { document: doc, renderAll() {}, renderBlock() {}, getBlockElement() { return null; } },
+      notePanel: null,
+      ensureCursorOnTabRow() {
+        if (this.document.blocks[this.cursor.blockIndex]?.type === 'tabrow') return true;
+        for (let i = 0; i < this.document.blocks.length; i++) {
+          if (this.document.blocks[i].type === 'tabrow') { this.cursor.blockIndex = i; this.cursor.columnIndex = 0; return true; }
+        }
+        return false;
+      },
+      renderBlock() {},
+      updateCursor() {},
+      updateUndoRedoButtons() {},
+    };
+
+    const mode = new BaseTabEditMode(app);
+    mode.name = 'test';
+
+    // Click past end of row: set cursor to end-of-row
+    ensureColumns(block);
+    app.cursor.columnIndex = block.columns.length; // past the closing bar
+
+    // Insert D string fret 0 (chord D, press 4 = string 4 = D string)
+    mode.insertFret(3, 0);
+
+    const editorLines = getEditorLineTexts(block);
+
+    expect(editorLines[0]).toBe('e|---|');
+    expect(editorLines[1]).toBe('B|---|');
+    expect(editorLines[2]).toBe('G|---|');
+    expect(editorLines[3]).toBe('D|-0-|');
+    expect(editorLines[4]).toBe('A|---|');
+    expect(editorLines[5]).toBe('E|---|');
+  });
+});
+
 describe('Repeat start then insert note: correct spacing', () => {
   test('Add Repeat Start, select G, type 6: exact output', () => {
     const block = createTabRowBlock({

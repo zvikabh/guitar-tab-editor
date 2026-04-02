@@ -24,6 +24,7 @@ class App {
     this.fileIO = new FileIO();
     this.noteLength = '1/8';
     this.chordMode = false;
+    this._dirty = false; // true if edits made since last save
 
     // DOM elements
     const editorEl = document.getElementById('tab-editor');
@@ -54,6 +55,14 @@ class App {
 
     // Click handler for the editor
     editorEl.addEventListener('click', (event) => this._onEditorClick(event));
+
+    // Warn before leaving page with unsaved edits
+    window.addEventListener('beforeunload', (e) => {
+      if (this._dirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
 
     // Create initial empty document
     this._createNewDocument();
@@ -147,6 +156,7 @@ class App {
 
   updateUndoRedoButtons() {
     this.toolbar.updateUndoRedoButtons();
+    this._dirty = true;
   }
 
   /**
@@ -178,6 +188,9 @@ class App {
   // --- File operations ---
 
   async open() {
+    if (this._dirty) {
+      if (!confirm('You have unsaved changes. Open a new file anyway?')) return;
+    }
     const result = await this.fileIO.open();
     if (!result) return;
 
@@ -205,6 +218,7 @@ class App {
       this.updateCursor();
     }
     this.updateUndoRedoButtons();
+    this._dirty = false;
     document.title = `${result.name} — Guitar Tab Editor`;
   }
 
@@ -228,6 +242,7 @@ class App {
     }
 
     await this.fileIO.save(text, suggestedName);
+    this._dirty = false;
   }
 
   // --- Undo/Redo ---

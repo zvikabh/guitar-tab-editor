@@ -101,8 +101,7 @@ body {
 }
 
 .line-post {
-  color: #666;
-  font-style: italic;
+  color: #0066ccd0;
 }
 
 .line-text {
@@ -112,6 +111,13 @@ body {
 .line-raw {
   color: #333;
   min-height: 1.4em;
+}
+
+.raw-selection {
+  position: absolute;
+  background: rgba(0, 102, 204, 0.2);
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* ===== Cursor ===== */

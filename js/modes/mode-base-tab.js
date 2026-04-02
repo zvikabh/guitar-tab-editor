@@ -92,12 +92,20 @@ export class BaseTabEditMode {
 
     colIdx = Math.min(colIdx, block.columns.length);
 
-    // If at end-of-row and the last column is a closing bar, insert before it.
-    // The closing | is aesthetic — treat it like "end of content".
-    // Target the bar column itself so the note is spliced before it (no rest consumption).
+    // If at end-of-row and the last column is a closing bar, insert inside the bar.
+    // Find the last rest before the closing bar to consume it (preserving leading hyphens).
+    // If no rest, insert before the bar directly.
     if (colIdx >= block.columns.length && block.columns.length > 0 &&
         block.columns[block.columns.length - 1].type === 'bar') {
-      colIdx = block.columns.length - 1;
+      const barIdx = block.columns.length - 1;
+      // Walk back from the bar to find a rest to insert into
+      let targetIdx = barIdx - 1;
+      while (targetIdx >= 0 && block.columns[targetIdx].type !== 'rest') targetIdx--;
+      if (targetIdx >= 0 && block.columns[targetIdx].type === 'rest') {
+        colIdx = targetIdx; // insert into the rest (triggers consumption)
+      } else {
+        colIdx = barIdx; // no rest found, insert before bar
+      }
     }
     insertNote(block, colIdx, notes, duration);
 

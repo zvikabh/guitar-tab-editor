@@ -40,6 +40,18 @@ export class KeyboardHandler {
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+    // Copy/Cut/Paste: let native clipboard events handle them (don't intercept)
+    if (['c', 'v', 'x'].includes(event.key)) return;
+
+    // Select All: delegate to mode
+    if (event.key === 'a') {
+      const mode = this.app.getActiveMode();
+      if (mode && mode.handleKeyDown) {
+        mode.handleKeyDown(event);
+      }
+      return;
+    }
+
     if (event.key === 's') {
       event.preventDefault();
       this.app.save();
@@ -63,7 +75,7 @@ export class KeyboardHandler {
    */
   _onKeyDown(event) {
     // Skip if already handled by global handler
-    if (hasModifier(event) && ['s', 'o', 'z', 'Z', 'y'].includes(event.key)) return;
+    if (hasModifier(event) && ['s', 'o', 'z', 'Z', 'y', 'c', 'v', 'x', 'a'].includes(event.key)) return;
 
     const mode = this.app.getActiveMode();
     if (mode && mode.handleKeyDown) {

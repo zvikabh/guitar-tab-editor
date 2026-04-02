@@ -22,6 +22,8 @@ export class RawEditMode {
     this._undoStack = [];
     /** @type {Array<{lines: string[], lineIndex: number, charIndex: number}>} */
     this._redoStack = [];
+    // Selection: null when no selection, otherwise {lineIndex, charIndex} of anchor
+    this._selAnchor = null;
   }
 
   activate() {
@@ -43,6 +45,14 @@ export class RawEditMode {
     // Render flat lines
     this._renderFlatLines();
 
+    // Listen for native clipboard events
+    this._copyHandler = (e) => this._onCopy(e);
+    this._cutHandler = (e) => this._onCut(e);
+    this._pasteHandler = (e) => this._onPaste(e);
+    document.addEventListener('copy', this._copyHandler);
+    document.addEventListener('cut', this._cutHandler);
+    document.addEventListener('paste', this._pasteHandler);
+
     // Reset cursor to start
     this.app.cursor.blockIndex = 0;
     this.app.cursor.lineIndex = 0;
@@ -51,6 +61,14 @@ export class RawEditMode {
   }
 
   deactivate() {
+    // Remove clipboard event listeners
+    if (this._copyHandler) document.removeEventListener('copy', this._copyHandler);
+    if (this._cutHandler) document.removeEventListener('cut', this._cutHandler);
+    if (this._pasteHandler) document.removeEventListener('paste', this._pasteHandler);
+    this._copyHandler = null;
+    this._cutHandler = null;
+    this._pasteHandler = null;
+
     if (!this._lines) return true;
 
     const text = this._lines.join('\n') + '\n';
@@ -85,86 +103,126 @@ export class RawEditMode {
 
     const cursor = this.app.cursor;
     const line = this._lines[cursor.lineIndex] || '';
+    const isMod = event.ctrlKey || event.metaKey;
+
+    // Copy/Cut/Paste are handled by native clipboard events (_onCopy, _onCut, _onPaste).
+    // Let them pass through to the browser.
+    if (isMod && ['c', 'v', 'x'].includes(event.key)) {
+      return; // don't preventDefault — let native clipboard events fire
+    }
+
+    // Select All
+    if (isMod && event.key === 'a') {
+      event.preventDefault();
+      this._selectAll();
+      return;
+    }
+
+    // For arrow keys: shift extends selection, no shift clears it
+    const extending = event.shiftKey;
 
     switch (event.key) {
       case 'ArrowLeft':
         event.preventDefault();
+        if (extending) this._ensureSelAnchor();
+        else if (this._hasSelection()) { this._clearSelection(); }
         if (cursor.charIndex > 0) {
           cursor.charIndex--;
         } else if (cursor.lineIndex > 0) {
           cursor.lineIndex--;
           cursor.charIndex = this._lines[cursor.lineIndex].length;
         }
-        this._updateCursorDisplay();
+        if (extending) this._updateSelectionDisplay();
+        else this._updateCursorDisplay();
         break;
 
       case 'ArrowRight':
         event.preventDefault();
+        if (extending) this._ensureSelAnchor();
+        else if (this._hasSelection()) { this._clearSelection(); }
         if (cursor.charIndex < line.length) {
           cursor.charIndex++;
         } else if (cursor.lineIndex < this._lines.length - 1) {
           cursor.lineIndex++;
           cursor.charIndex = 0;
         }
-        this._updateCursorDisplay();
+        if (extending) this._updateSelectionDisplay();
+        else this._updateCursorDisplay();
         break;
 
       case 'ArrowUp':
         event.preventDefault();
+        if (extending) this._ensureSelAnchor();
+        else if (this._hasSelection()) { this._clearSelection(); }
         if (cursor.lineIndex > 0) {
           cursor.lineIndex--;
           cursor.charIndex = Math.min(cursor.charIndex, this._lines[cursor.lineIndex].length);
         }
-        this._updateCursorDisplay();
+        if (extending) this._updateSelectionDisplay();
+        else this._updateCursorDisplay();
         break;
 
       case 'ArrowDown':
         event.preventDefault();
+        if (extending) this._ensureSelAnchor();
+        else if (this._hasSelection()) { this._clearSelection(); }
         if (cursor.lineIndex < this._lines.length - 1) {
           cursor.lineIndex++;
           cursor.charIndex = Math.min(cursor.charIndex, this._lines[cursor.lineIndex].length);
         }
-        this._updateCursorDisplay();
+        if (extending) this._updateSelectionDisplay();
+        else this._updateCursorDisplay();
         break;
 
       case 'Home':
         event.preventDefault();
+        if (extending) this._ensureSelAnchor();
+        else if (this._hasSelection()) { this._clearSelection(); }
         cursor.charIndex = 0;
-        this._updateCursorDisplay();
+        if (extending) this._updateSelectionDisplay();
+        else this._updateCursorDisplay();
         break;
 
       case 'End':
         event.preventDefault();
+        if (extending) this._ensureSelAnchor();
+        else if (this._hasSelection()) { this._clearSelection(); }
         cursor.charIndex = line.length;
-        this._updateCursorDisplay();
+        if (extending) this._updateSelectionDisplay();
+        else this._updateCursorDisplay();
         break;
 
       case 'Backspace':
         event.preventDefault();
-        this._backspace();
+        if (this._hasSelection()) { this._deleteSelection(); }
+        else { this._backspace(); }
         break;
 
       case 'Delete':
         event.preventDefault();
-        this._delete();
+        if (this._hasSelection()) { this._deleteSelection(); }
+        else { this._delete(); }
         break;
 
       case 'Enter':
         event.preventDefault();
+        if (this._hasSelection()) { this._deleteSelection(); }
         this._insertNewline();
         break;
 
       case 'Escape':
         event.preventDefault();
-        // Return to previous mode if we entered raw mode via text click
-        if (this.app._previousModeName) {
+        if (this._hasSelection()) {
+          this._clearSelection();
+        } else if (this.app._previousModeName) {
           this.app.returnFromRawMode();
         }
         break;
 
       default:
-        if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
+        if (event.key.length === 1 && !isMod) {
           event.preventDefault();
+          if (this._hasSelection()) { this._deleteSelection(); }
           this._insertChar(event.key);
         }
         break;
@@ -183,6 +241,7 @@ export class RawEditMode {
     this._redoStack = [];
     // Cap at 200 entries
     if (this._undoStack.length > 200) this._undoStack.shift();
+    this.app._dirty = true;
   }
 
   undo() {
@@ -216,6 +275,190 @@ export class RawEditMode {
     cursor.charIndex = state.charIndex;
     this._renderFlatLines();
     this._updateCursorDisplay();
+  }
+
+  // --- Selection ---
+
+  _hasSelection() {
+    return this._selAnchor !== null;
+  }
+
+  _ensureSelAnchor() {
+    if (!this._selAnchor) {
+      const cursor = this.app.cursor;
+      this._selAnchor = { lineIndex: cursor.lineIndex, charIndex: cursor.charIndex };
+    }
+  }
+
+  _clearSelection() {
+    this._selAnchor = null;
+    this._removeSelectionHighlight();
+    this._updateCursorDisplay();
+  }
+
+  /** Get ordered selection range: start and end as {lineIndex, charIndex}. */
+  _getSelectionRange() {
+    if (!this._selAnchor) return null;
+    const cursor = this.app.cursor;
+    const a = this._selAnchor;
+    const b = { lineIndex: cursor.lineIndex, charIndex: cursor.charIndex };
+
+    if (a.lineIndex < b.lineIndex || (a.lineIndex === b.lineIndex && a.charIndex <= b.charIndex)) {
+      return { start: a, end: b };
+    }
+    return { start: b, end: a };
+  }
+
+  /** Get the selected text as a string. */
+  _getSelectedText() {
+    const range = this._getSelectionRange();
+    if (!range) return '';
+    const { start, end } = range;
+
+    if (start.lineIndex === end.lineIndex) {
+      return this._lines[start.lineIndex].substring(start.charIndex, end.charIndex);
+    }
+
+    const parts = [];
+    parts.push(this._lines[start.lineIndex].substring(start.charIndex));
+    for (let i = start.lineIndex + 1; i < end.lineIndex; i++) {
+      parts.push(this._lines[i]);
+    }
+    parts.push(this._lines[end.lineIndex].substring(0, end.charIndex));
+    return parts.join('\n');
+  }
+
+  /** Delete the selected text and clear selection. */
+  _deleteSelection() {
+    const range = this._getSelectionRange();
+    if (!range) return;
+
+    this._pushUndo();
+    const { start, end } = range;
+
+    if (start.lineIndex === end.lineIndex) {
+      const line = this._lines[start.lineIndex];
+      this._lines[start.lineIndex] = line.substring(0, start.charIndex) + line.substring(end.charIndex);
+    } else {
+      const firstPart = this._lines[start.lineIndex].substring(0, start.charIndex);
+      const lastPart = this._lines[end.lineIndex].substring(end.charIndex);
+      this._lines[start.lineIndex] = firstPart + lastPart;
+      this._lines.splice(start.lineIndex + 1, end.lineIndex - start.lineIndex);
+    }
+
+    this.app.cursor.lineIndex = start.lineIndex;
+    this.app.cursor.charIndex = start.charIndex;
+    this._selAnchor = null;
+    this._renderFlatLines();
+    this._updateCursorDisplay();
+  }
+
+  /** Native copy event handler */
+  _onCopy(e) {
+    if (!this._lines) return;
+    const text = this._getSelectedText();
+    if (!text) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', text);
+  }
+
+  /** Native cut event handler */
+  _onCut(e) {
+    if (!this._lines) return;
+    const text = this._getSelectedText();
+    if (!text) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', text);
+    this._deleteSelection();
+  }
+
+  /** Native paste event handler */
+  _onPaste(e) {
+    if (!this._lines) return;
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+
+    if (this._hasSelection()) {
+      this._deleteSelection();
+    }
+
+    this._pushUndo();
+    const cursor = this.app.cursor;
+    const pasteLines = text.split('\n');
+
+    if (pasteLines.length === 1) {
+      const line = this._lines[cursor.lineIndex] || '';
+      this._lines[cursor.lineIndex] = line.slice(0, cursor.charIndex) + pasteLines[0] + line.slice(cursor.charIndex);
+      cursor.charIndex += pasteLines[0].length;
+    } else {
+      const line = this._lines[cursor.lineIndex] || '';
+      const before = line.slice(0, cursor.charIndex);
+      const after = line.slice(cursor.charIndex);
+
+      this._lines[cursor.lineIndex] = before + pasteLines[0];
+      const middleLines = pasteLines.slice(1, -1);
+      const lastPasteLine = pasteLines[pasteLines.length - 1] + after;
+      this._lines.splice(cursor.lineIndex + 1, 0, ...middleLines, lastPasteLine);
+
+      cursor.lineIndex += pasteLines.length - 1;
+      cursor.charIndex = pasteLines[pasteLines.length - 1].length;
+    }
+
+    this._renderFlatLines();
+    this._updateCursorDisplay();
+  }
+
+  _selectAll() {
+    if (!this._lines || this._lines.length === 0) return;
+    this._selAnchor = { lineIndex: 0, charIndex: 0 };
+    const lastLine = this._lines.length - 1;
+    this.app.cursor.lineIndex = lastLine;
+    this.app.cursor.charIndex = this._lines[lastLine].length;
+    this._updateSelectionDisplay();
+  }
+
+  // --- Selection display ---
+
+  _updateSelectionDisplay() {
+    this._removeSelectionHighlight();
+
+    const range = this._getSelectionRange();
+    if (!range) { this._updateCursorDisplay(); return; }
+
+    const container = this.app.editor.containerEl;
+    const lineEls = container.querySelectorAll('.line-raw');
+    const { start, end } = range;
+    const charWidth = this.app.cursor.charWidth;
+
+    for (let i = start.lineIndex; i <= end.lineIndex; i++) {
+      const lineEl = lineEls[i];
+      if (!lineEl) continue;
+
+      const lineLen = (this._lines[i] || '').length;
+      const selStart = (i === start.lineIndex) ? start.charIndex : 0;
+      const selEnd = (i === end.lineIndex) ? end.charIndex : lineLen;
+
+      if (selStart === selEnd && i !== start.lineIndex && i !== end.lineIndex) {
+        // Full line selected (empty line)
+      }
+
+      const highlight = document.createElement('div');
+      highlight.className = 'raw-selection';
+      highlight.style.left = `${selStart * charWidth}px`;
+      highlight.style.width = `${Math.max(1, (selEnd - selStart) * charWidth)}px`;
+      highlight.style.top = '0';
+      highlight.style.height = '100%';
+      lineEl.style.position = 'relative';
+      lineEl.appendChild(highlight);
+    }
+
+    this._updateCursorDisplay();
+  }
+
+  _removeSelectionHighlight() {
+    const container = this.app.editor.containerEl;
+    container.querySelectorAll('.raw-selection').forEach(el => el.remove());
   }
 
   // --- Editing on flat lines ---
@@ -321,7 +564,7 @@ export class RawEditMode {
     }
   }
 
-  /** Handle clicks in raw mode: set cursor position from click. */
+  /** Handle clicks in raw mode: set cursor position from click. Shift+click extends selection. */
   handleClick(event) {
     if (!this._lines) return;
     const lineEl = event.target.closest('.line-raw');
@@ -331,10 +574,24 @@ export class RawEditMode {
     if (isNaN(lineIdx)) return;
 
     const cursor = this.app.cursor;
-    cursor.lineIndex = lineIdx;
-    cursor.charIndex = cursor.clickToCharIndex(lineEl, event.clientX);
-    cursor.charIndex = Math.min(cursor.charIndex, (this._lines[lineIdx] || '').length);
-    this._updateCursorDisplay();
+    const charIdx = Math.min(
+      cursor.clickToCharIndex(lineEl, event.clientX),
+      (this._lines[lineIdx] || '').length
+    );
+
+    if (event.shiftKey) {
+      // Extend selection from current cursor to click position
+      this._ensureSelAnchor();
+      cursor.lineIndex = lineIdx;
+      cursor.charIndex = charIdx;
+      this._updateSelectionDisplay();
+    } else {
+      // Normal click: clear selection and move cursor
+      this._clearSelection();
+      cursor.lineIndex = lineIdx;
+      cursor.charIndex = charIdx;
+      this._updateCursorDisplay();
+    }
   }
 
   // --- Error banner ---
