@@ -24,7 +24,8 @@ function makeEmptyDoc() {
 }
 
 function advanceCursor(colIdx, duration, block) {
-  let c = colIdx + 1 + (DURATION_GAPS[duration] > 0 ? 1 : 0);
+  const gap = duration in DURATION_GAPS ? DURATION_GAPS[duration] : 1;
+  let c = colIdx + 1 + gap;
   return Math.min(c, block.columns.length);
 }
 

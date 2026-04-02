@@ -29,10 +29,12 @@ export class NoteEditMode extends BaseTabEditMode {
     this.app.editor.renderAll();
     this.app.updateCursor();
     this._updateFretboardHighlight();
+    this._activateClipboard();
   }
 
   deactivate() {
     this._clearFretAccum();
+    this._deactivateClipboard();
     return true;
   }
 
@@ -49,8 +51,8 @@ export class NoteEditMode extends BaseTabEditMode {
     }
 
     switch (event.key) {
-      case 'ArrowLeft': event.preventDefault(); this._moveCursorLeft(); this._updateFretboardHighlight(); break;
-      case 'ArrowRight': event.preventDefault(); this._moveCursorRight(); this._updateFretboardHighlight(); break;
+      case 'ArrowLeft': event.preventDefault(); this._moveCursorLeft(event.shiftKey); this._updateFretboardHighlight(); break;
+      case 'ArrowRight': event.preventDefault(); this._moveCursorRight(event.shiftKey); this._updateFretboardHighlight(); break;
       case 'ArrowUp':
         event.preventDefault();
         if (cursor.stringIndex > 0) { cursor.stringIndex--; this.app.updateCursor(); }

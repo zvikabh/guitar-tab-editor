@@ -409,6 +409,36 @@ export class RawEditMode {
     this._updateCursorDisplay();
   }
 
+  /** Handle paste from keyboard (Cmd+V) when global handler intercepts it. */
+  async _handlePasteFromKeyboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return;
+      // Simulate a paste event
+      if (this._hasSelection()) this._deleteSelection();
+      this._pushUndo();
+      const cursor = this.app.cursor;
+      const pasteLines = text.split('\n');
+      if (pasteLines.length === 1) {
+        const line = this._lines[cursor.lineIndex] || '';
+        this._lines[cursor.lineIndex] = line.slice(0, cursor.charIndex) + pasteLines[0] + line.slice(cursor.charIndex);
+        cursor.charIndex += pasteLines[0].length;
+      } else {
+        const line = this._lines[cursor.lineIndex] || '';
+        const before = line.slice(0, cursor.charIndex);
+        const after = line.slice(cursor.charIndex);
+        this._lines[cursor.lineIndex] = before + pasteLines[0];
+        const middleLines = pasteLines.slice(1, -1);
+        const lastPasteLine = pasteLines[pasteLines.length - 1] + after;
+        this._lines.splice(cursor.lineIndex + 1, 0, ...middleLines, lastPasteLine);
+        cursor.lineIndex += pasteLines.length - 1;
+        cursor.charIndex = pasteLines[pasteLines.length - 1].length;
+      }
+      this._renderFlatLines();
+      this._updateCursorDisplay();
+    } catch (e) {}
+  }
+
   _selectAll() {
     if (!this._lines || this._lines.length === 0) return;
     this._selAnchor = { lineIndex: 0, charIndex: 0 };

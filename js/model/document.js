@@ -187,26 +187,15 @@ export function parseColumns(strings) {
       continue;
     }
 
-    // Dash (rest/spacing) — collect consecutive dashes as a rest column
+    // Dash (rest/spacing) — one column per hyphen
     if (chars.every(c => c === '-' || c === ' ')) {
-      let restWidth = 0;
-      while (pos + restWidth < len) {
-        const rc = strings.map(s => s[pos + restWidth] || '-');
-        if (rc.every(c => c === '-' || c === ' ')) {
-          restWidth++;
-        } else {
-          break;
-        }
-      }
-      if (restWidth > 0) {
-        columns.push({
-          position: pos,
-          width: restWidth,
-          notes: [null, null, null, null, null, null],
-          type: 'rest',
-        });
-        pos += restWidth;
-      }
+      columns.push({
+        position: pos,
+        width: 1,
+        notes: [null, null, null, null, null, null],
+        type: 'rest',
+      });
+      pos++;
       continue;
     }
 
@@ -414,15 +403,16 @@ export function insertNote(block, colIdx, notes, duration = '1/8') {
     type: 'note',
   };
 
-  // Build spacing rest column if gap > 0
-  const restCol = gap > 0 ? {
-    position: 0,
-    width: gap,
-    notes: [null, null, null, null, null, null],
-    type: 'rest',
-  } : null;
+  // Build spacing rest columns (one per hyphen)
+  const restCols = [];
+  for (let i = 0; i < gap; i++) {
+    restCols.push({
+      position: 0, width: 1,
+      notes: [null, null, null, null, null, null], type: 'rest',
+    });
+  }
 
-  const insertItems = restCol ? [newCol, restCol] : [newCol];
+  const insertItems = [newCol, ...restCols];
 
   // If inserting right after a bar with no rest between, add a leading padding rest
   if (colIdx > 0 && block.columns[colIdx - 1].type === 'bar' &&
@@ -433,20 +423,20 @@ export function insertNote(block, colIdx, notes, duration = '1/8') {
     });
   }
 
-  // If inserting at a rest column, consume space from its END (preserving leading hyphens)
+  // If inserting at a rest column, consume consecutive rest columns from the end
+  // (preserving leading hyphens)
   if (colIdx < block.columns.length && block.columns[colIdx].type === 'rest') {
-    const existingRest = block.columns[colIdx];
-    const remainingWidth = existingRest.width - totalWidth;
-    if (remainingWidth > 0) {
-      // Keep a leading rest, then insert the note+spacing after it
-      existingRest.width = remainingWidth;
-      block.columns.splice(colIdx + 1, 0, ...insertItems);
-    } else {
-      // Replace the rest entirely (note + spacing >= rest width)
-      block.columns.splice(colIdx, 1, ...insertItems);
+    // Count consecutive rests starting at colIdx
+    let restCount = 0;
+    while (colIdx + restCount < block.columns.length &&
+           block.columns[colIdx + restCount].type === 'rest') {
+      restCount++;
     }
+    // Keep exactly 1 leading rest for aesthetics, consume the rest
+    const keepLeading = 1;
+    const consumeCount = restCount - keepLeading;
+    block.columns.splice(colIdx + keepLeading, consumeCount, ...insertItems);
   } else {
-    // Insert before the column at colIdx (pushes it right)
     block.columns.splice(colIdx, 0, ...insertItems);
   }
 

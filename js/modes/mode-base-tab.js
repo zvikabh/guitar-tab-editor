@@ -18,15 +18,42 @@ import {
   removeBarline,
   splitTabRow,
   syncStringsFromColumns,
+  columnsToStrings,
+  parseColumns,
   createTextBlock,
+  createTabRowBlock,
   DURATION_GAPS,
 } from '../model/document.js';
+import { renderDocument } from '../model/renderer.js';
+import { parseTabText } from '../model/parser.js';
 
 export class BaseTabEditMode {
   constructor(app) {
     this.app = app;
     this.name = ''; // override in subclass
     this._wasChordMode = false; // tracks chord→normal transition
+    this._selAnchorCol = null; // selection anchor column index (null = no selection)
+  }
+
+  /** Set up clipboard event listeners. Call from subclass activate(). */
+  _activateClipboard() {
+    this._copyHandler = (e) => this._onCopy(e);
+    this._cutHandler = (e) => this._onCut(e);
+    this._pasteHandler = (e) => this._onPaste(e);
+    document.addEventListener('copy', this._copyHandler);
+    document.addEventListener('cut', this._cutHandler);
+    document.addEventListener('paste', this._pasteHandler);
+  }
+
+  /** Remove clipboard event listeners. Call from subclass deactivate(). */
+  _deactivateClipboard() {
+    if (this._copyHandler) document.removeEventListener('copy', this._copyHandler);
+    if (this._cutHandler) document.removeEventListener('cut', this._cutHandler);
+    if (this._pasteHandler) document.removeEventListener('paste', this._pasteHandler);
+    this._copyHandler = null;
+    this._cutHandler = null;
+    this._pasteHandler = null;
+    this._clearSelection();
   }
 
   /** Push an undo snapshot including the current cursor state. */
@@ -95,22 +122,37 @@ export class BaseTabEditMode {
     // If at end-of-row and the last column is a closing bar, insert inside the bar.
     // Find the last rest before the closing bar to consume it (preserving leading hyphens).
     // If no rest, insert before the bar directly.
-    if (colIdx >= block.columns.length && block.columns.length > 0 &&
+    // Treat cursor at closing bar the same as end-of-row
+    const atClosingBar = (colIdx < block.columns.length &&
+        block.columns[colIdx].type === 'bar' &&
+        colIdx === block.columns.length - 1);
+    if ((colIdx >= block.columns.length || atClosingBar) &&
+        block.columns.length > 0 &&
         block.columns[block.columns.length - 1].type === 'bar') {
       const barIdx = block.columns.length - 1;
-      // Walk back from the bar to find a rest to insert into
-      let targetIdx = barIdx - 1;
-      while (targetIdx >= 0 && block.columns[targetIdx].type !== 'rest') targetIdx--;
-      if (targetIdx >= 0 && block.columns[targetIdx].type === 'rest') {
-        colIdx = targetIdx; // insert into the rest (triggers consumption)
+      // Find trailing free rests (after the last note) before the bar
+      let lastNoteIdx = barIdx - 1;
+      while (lastNoteIdx >= 0 && block.columns[lastNoteIdx].type !== 'note') lastNoteIdx--;
+      // Free rests start after the last note's trailing spacing
+      // Skip the last note's trailing rests (they're its timing, not free space)
+      let freeRestStart = lastNoteIdx + 1;
+      if (lastNoteIdx >= 0) {
+        // Skip past the last note's gap rests
+        const lastNoteGap = duration in DURATION_GAPS ? DURATION_GAPS[duration] : 1;
+        freeRestStart = Math.min(lastNoteIdx + 1 + lastNoteGap, barIdx);
+      }
+      if (freeRestStart < barIdx && block.columns[freeRestStart].type === 'rest') {
+        colIdx = freeRestStart; // insert into free rests
       } else {
-        colIdx = barIdx; // no rest found, insert before bar
+        colIdx = barIdx; // no free space, insert before bar
       }
     }
     insertNote(block, colIdx, notes, duration);
 
     // Advance cursor past the inserted note+spacing
-    cursor.columnIndex = this._findColumnAfterInsert(block, colIdx, true);
+    const gap = duration in DURATION_GAPS ? DURATION_GAPS[duration] : 1;
+    const insertCount = 1 + gap; // note + gap rest columns
+    cursor.columnIndex = this._findColumnAfterInsert(block, colIdx, true, insertCount);
     this._syncCursorCharFromColumn();
     this._refreshAfterEdit();
     this._checkAutoBarline();
@@ -138,23 +180,29 @@ export class BaseTabEditMode {
     }
   }
 
-  /** Find the column index the cursor should be at after an insert at colIdx. */
-  _findColumnAfterInsert(block, colIdx, advance) {
+  /** Find the column index the cursor should be at after an insert at colIdx.
+   *  Uses insertItemCount to know exactly how many columns were inserted. */
+  _findColumnAfterInsert(block, colIdx, advance, insertItemCount) {
     if (!advance) {
       // For chord mode: stay on the note (which might have shifted)
-      // The note is at colIdx or colIdx+1 (if rest was kept before it)
       for (let i = colIdx; i < block.columns.length; i++) {
         if (block.columns[i].type === 'note') return i;
       }
       return colIdx;
     }
-    // Advance: skip past the inserted note and its trailing rest
+    // Find the note we just inserted, then advance past it and its trailing spacing
+    // The inserted items start somewhere at or after colIdx.
+    // Find the note column starting from colIdx
     let idx = colIdx;
-    // Skip the note
-    if (idx < block.columns.length && block.columns[idx].type === 'rest') idx++; // leading rest from insert-into-rest
-    if (idx < block.columns.length && block.columns[idx].type === 'note') idx++;
-    // Skip trailing rest
-    if (idx < block.columns.length && block.columns[idx].type === 'rest') idx++;
+    while (idx < block.columns.length && block.columns[idx].type === 'rest') idx++;
+    // idx is now at the note. Advance past it + insertItemCount - 1 (the rest cols)
+    if (insertItemCount !== undefined) {
+      idx += insertItemCount;
+    } else {
+      // Fallback: skip note + trailing rests
+      if (idx < block.columns.length && block.columns[idx].type === 'note') idx++;
+      while (idx < block.columns.length && block.columns[idx].type === 'rest') idx++;
+    }
     return Math.min(idx, block.columns.length);
   }
 
@@ -281,43 +329,249 @@ export class BaseTabEditMode {
     this._refreshAfterEdit();
   }
 
+  // --- Selection ---
+
+  _hasSelection() {
+    return this._selAnchorCol !== null;
+  }
+
+  _ensureSelAnchor() {
+    if (this._selAnchorCol === null) {
+      this._selAnchorCol = this.app.cursor.columnIndex;
+    }
+  }
+
+  _clearSelection() {
+    this._selAnchorCol = null;
+    this._removeSelectionHighlight();
+  }
+
+  /** Get ordered selection range as { startCol, endCol }. */
+  _getSelectionRange() {
+    if (this._selAnchorCol === null) return null;
+    const curCol = this.app.cursor.columnIndex;
+    const a = this._selAnchorCol;
+    const b = curCol;
+    return { startCol: Math.min(a, b), endCol: Math.max(a, b) };
+  }
+
+  /** Get the text representation of the selected columns. */
+  _getSelectedText() {
+    const range = this._getSelectionRange();
+    if (!range) return '';
+    const block = this.app.document.blocks[this.app.cursor.blockIndex];
+    if (!block || block.type !== 'tabrow') return '';
+    ensureColumns(block);
+
+    const selectedCols = block.columns.slice(range.startCol, range.endCol);
+    if (selectedCols.length === 0) return '';
+
+    // Render just the selected columns as tab text
+    const strings = columnsToStrings(selectedCols);
+    const lines = [];
+    for (let s = 0; s < 6; s++) {
+      lines.push(`${block.labels[s]}|${strings[s]}`);
+    }
+    return lines.join('\n');
+  }
+
+  /** Delete the selected columns. */
+  _deleteSelection() {
+    const range = this._getSelectionRange();
+    if (!range) return;
+    const block = this.app.document.blocks[this.app.cursor.blockIndex];
+    if (!block || block.type !== 'tabrow') return;
+    ensureColumns(block);
+
+    this._pushUndoSnapshot();
+    block.columns.splice(range.startCol, range.endCol - range.startCol);
+    syncStringsFromColumns(block);
+
+    this.app.cursor.columnIndex = range.startCol;
+    if (this.app.cursor.columnIndex > block.columns.length) {
+      this.app.cursor.columnIndex = block.columns.length;
+    }
+    this._selAnchorCol = null;
+    this._syncCursorCharFromColumn();
+    this._refreshAfterEdit();
+  }
+
+  /** Paste tab text at cursor position. */
+  _pasteTabText(text) {
+    const block = this.app.document.blocks[this.app.cursor.blockIndex];
+    if (!block || block.type !== 'tabrow') return;
+
+    // Try to parse the pasted text as tab lines
+    const lines = text.split('\n');
+    // Extract string contents (strip label| prefix)
+    const tabContents = [];
+    for (const line of lines) {
+      const m = line.match(/^[a-gA-G][#b♭♯]?[|‖](.*)/);
+      if (m) {
+        tabContents.push(m[1]);
+      }
+    }
+    if (tabContents.length !== 6) return; // not valid tab text
+
+    // Parse the pasted content into columns
+    const pastedCols = parseColumns(tabContents);
+    if (pastedCols.length === 0) return;
+
+    this._pushUndoSnapshot();
+    ensureColumns(block);
+
+    if (this._hasSelection()) {
+      const range = this._getSelectionRange();
+      block.columns.splice(range.startCol, range.endCol - range.startCol, ...pastedCols);
+      this.app.cursor.columnIndex = range.startCol + pastedCols.length;
+      this._selAnchorCol = null;
+    } else {
+      const colIdx = Math.min(this.app.cursor.columnIndex, block.columns.length);
+      block.columns.splice(colIdx, 0, ...pastedCols);
+      this.app.cursor.columnIndex = colIdx + pastedCols.length;
+    }
+
+    syncStringsFromColumns(block);
+    this._syncCursorCharFromColumn();
+    this._refreshAfterEdit();
+  }
+
+  _updateSelectionDisplay() {
+    this._removeSelectionHighlight();
+    const range = this._getSelectionRange();
+    if (!range) return;
+
+    const block = this.app.document.blocks[this.app.cursor.blockIndex];
+    if (!block || block.type !== 'tabrow' || !block.columns) return;
+
+    const blockEl = this.app.editor.getBlockElement(this.app.cursor.blockIndex);
+    if (!blockEl) return;
+
+    // Highlight ALL lines in the block (preLines, tab strings, postLines)
+    const allLines = blockEl.querySelectorAll('.line');
+    if (allLines.length === 0) return;
+
+    const charWidth = this.app.cursor.charWidth;
+    const labelWidth = block.labels[0].length + 1;
+
+    const startPos = range.startCol < block.columns.length
+      ? block.columns[range.startCol].position : 0;
+    let endPos;
+    if (range.endCol < block.columns.length) {
+      endPos = block.columns[range.endCol].position;
+      // If start == end (single column selected), include the column's width
+      if (range.startCol === range.endCol) {
+        endPos += block.columns[range.endCol].width;
+      }
+    } else {
+      endPos = block.columns.length > 0
+        ? block.columns[block.columns.length - 1].position + block.columns[block.columns.length - 1].width
+        : 0;
+    }
+
+    const leftPx = (startPos + labelWidth) * charWidth;
+    const widthPx = Math.max(1, (endPos - startPos) * charWidth);
+
+    for (const lineEl of allLines) {
+      const highlight = document.createElement('div');
+      highlight.className = 'tab-selection';
+      highlight.style.left = `${leftPx}px`;
+      highlight.style.width = `${widthPx}px`;
+      highlight.style.top = '0';
+      highlight.style.height = '100%';
+      lineEl.style.position = 'relative';
+      lineEl.appendChild(highlight);
+    }
+  }
+
+  _removeSelectionHighlight() {
+    const container = this.app.editor?.containerEl;
+    if (container) {
+      container.querySelectorAll('.tab-selection').forEach(el => el.remove());
+    }
+  }
+
+  // --- Clipboard events ---
+
+  _onCopy(e) {
+    const text = this._getSelectedText();
+    if (!text) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', text);
+  }
+
+  _onCut(e) {
+    const text = this._getSelectedText();
+    if (!text) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', text);
+    this._deleteSelection();
+  }
+
+  _onPaste(e) {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+    this._pasteTabText(text);
+  }
+
+  /** Handle paste from keyboard (Cmd+V). Uses async clipboard API. */
+  async _handlePasteFromKeyboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) this._pasteTabText(text);
+    } catch (e) {
+      // Clipboard API not available
+    }
+  }
+
   // --- Cursor movement ---
 
-  _moveCursorLeft() {
+  _moveCursorLeft(extending = false) {
+    if (extending) this._ensureSelAnchor();
+    else if (this._hasSelection()) this._clearSelection();
+
     const cursor = this.app.cursor;
     const block = this.app.document.blocks[cursor.blockIndex];
     if (!block || block.type !== 'tabrow') return;
     ensureColumns(block);
 
-    let idx = cursor.columnIndex - 1;
-    while (idx >= 0 && block.columns[idx].type === 'rest') idx--;
-    if (idx >= 0) {
-      cursor.columnIndex = idx;
+    if (cursor.columnIndex > 0) {
+      cursor.columnIndex--;
       this._syncCursorCharFromColumn();
     }
     this._wasChordMode = false;
+    if (extending) this._updateSelectionDisplay();
     this.app.updateCursor();
   }
 
-  _moveCursorRight() {
+  _moveCursorRight(extending = false) {
+    if (extending) this._ensureSelAnchor();
+    else if (this._hasSelection()) this._clearSelection();
+
     const cursor = this.app.cursor;
     const block = this.app.document.blocks[cursor.blockIndex];
     if (!block || block.type !== 'tabrow') return;
     ensureColumns(block);
 
-    let idx = cursor.columnIndex + 1;
-    while (idx < block.columns.length && block.columns[idx].type === 'rest') idx++;
-    if (idx <= block.columns.length) { // allow moving to end-of-row (columns.length)
-      cursor.columnIndex = idx;
+    if (cursor.columnIndex < block.columns.length) {
+      cursor.columnIndex++;
       this._syncCursorCharFromColumn();
     }
     this._wasChordMode = false;
+    if (extending) this._updateSelectionDisplay();
     this.app.updateCursor();
   }
 
   // --- Deletion ---
 
   _deleteAtCursor(isBackspace) {
+    // If there's a selection, delete it regardless of backspace/delete
+    if (this._hasSelection()) {
+      this._deleteSelection();
+      return;
+    }
+
     const cursor = this.app.cursor;
     const doc = this.app.document;
     const block = doc.blocks[cursor.blockIndex];
@@ -332,29 +586,15 @@ export class BaseTabEditMode {
   }
 
   _handleBackspace(block, cursor, doc) {
-    // Find the meaningful column immediately LEFT of cursor (skip rests)
-    let targetIdx = cursor.columnIndex - 1;
-    while (targetIdx >= 0 && block.columns[targetIdx].type === 'rest') targetIdx--;
-    if (targetIdx < 0) return;
+    // Delete the single column immediately left of cursor
+    if (cursor.columnIndex <= 0) return;
 
-    const targetCol = block.columns[targetIdx];
+    this._pushUndoSnapshot();
+    const targetIdx = cursor.columnIndex - 1;
+    block.columns.splice(targetIdx, 1);
+    syncStringsFromColumns(block);
+    cursor.columnIndex = targetIdx;
 
-    if (targetCol.type === 'bar' || targetCol.type === 'repeat-start' || targetCol.type === 'repeat-end') {
-      // Delete the barline
-      this._pushUndoSnapshot();
-      removeBarline(block, targetIdx);
-      cursor.columnIndex = targetIdx;
-    } else if (targetCol.type === 'note') {
-      // Delete the note and its adjacent spacing
-      this._pushUndoSnapshot();
-      deleteNote(block, targetIdx);
-      // Move cursor to where the deleted note was
-      cursor.columnIndex = targetIdx;
-    } else {
-      return;
-    }
-
-    // Clamp cursor — allow end-of-row (columns.length) but not beyond
     if (cursor.columnIndex > block.columns.length) {
       cursor.columnIndex = block.columns.length;
     }
@@ -363,29 +603,16 @@ export class BaseTabEditMode {
   }
 
   _handleDelete(block, cursor, doc) {
-    // Find the meaningful column AT or RIGHT of cursor (skip rests)
-    let targetIdx = cursor.columnIndex;
-    while (targetIdx < block.columns.length && block.columns[targetIdx].type === 'rest') targetIdx++;
-
-    if (targetIdx >= block.columns.length) {
+    // Delete the single column at cursor position
+    if (cursor.columnIndex >= block.columns.length) {
       // At end of row — try combining with next row
       this._combineWithNextRow();
       return;
     }
 
-    const targetCol = block.columns[targetIdx];
-
-    if (targetCol.type === 'bar' || targetCol.type === 'repeat-start' || targetCol.type === 'repeat-end') {
-      // Delete the barline
-      this._pushUndoSnapshot();
-      removeBarline(block, targetIdx);
-    } else if (targetCol.type === 'note') {
-      // Delete the note and its adjacent spacing
-      this._pushUndoSnapshot();
-      deleteNote(block, targetIdx);
-    } else {
-      return;
-    }
+    this._pushUndoSnapshot();
+    block.columns.splice(cursor.columnIndex, 1);
+    syncStringsFromColumns(block);
 
     if (cursor.columnIndex > block.columns.length) {
       cursor.columnIndex = block.columns.length;
@@ -507,16 +734,19 @@ export class BaseTabEditMode {
     // But DO ensure a leading padding rest (width 3, matching initial doc's "---|")
     // so the first note insertion preserves a leading hyphen.
     ensureColumns(block2);
-    if (block2.columns.length === 0 || block2.columns[0].type !== 'rest') {
-      block2.columns.splice(0, 0, {
-        position: 0, width: 3,
+    // Ensure at least 3 leading rest columns (matching initial doc's "---|")
+    let leadingRests = 0;
+    while (leadingRests < block2.columns.length && block2.columns[leadingRests].type === 'rest') {
+      leadingRests++;
+    }
+    const LEADING_REST_COUNT = 3;
+    for (let i = leadingRests; i < LEADING_REST_COUNT; i++) {
+      block2.columns.splice(i, 0, {
+        position: 0, width: 1,
         notes: [null, null, null, null, null, null], type: 'rest',
       });
-      syncStringsFromColumns(block2);
-    } else if (block2.columns[0].type === 'rest' && block2.columns[0].width < 3) {
-      block2.columns[0].width = 3;
-      syncStringsFromColumns(block2);
     }
+    syncStringsFromColumns(block2);
 
     // Ensure block2 ends with a closing bar
     if (block2.columns.length === 0 || block2.columns[block2.columns.length - 1].type !== 'bar') {

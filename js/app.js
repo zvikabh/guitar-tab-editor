@@ -53,8 +53,10 @@ class App {
     this.activeMode = this.modes.fingerpick;
     this._previousModeName = null; // for returning from raw mode via Escape
 
-    // Click handler for the editor
-    editorEl.addEventListener('click', (event) => this._onEditorClick(event));
+    // Mouse handlers for the editor (click and drag selection)
+    editorEl.addEventListener('mousedown', (event) => this._onEditorMouseDown(event));
+    editorEl.addEventListener('mousemove', (event) => this._onEditorMouseMove(event));
+    editorEl.addEventListener('mouseup', (event) => this._onEditorMouseUp(event));
 
     // Warn before leaving page with unsaved edits
     window.addEventListener('beforeunload', (e) => {
@@ -420,7 +422,7 @@ class App {
     this.activeMode.activate();
   }
 
-  _onEditorClick(event) {
+  _onEditorMouseDown(event) {
     // In raw mode, delegate to the mode's click handler
     if (this.activeMode.name === 'raw' && this.activeMode.handleClick) {
       this.activeMode.handleClick(event);
@@ -434,7 +436,6 @@ class App {
     const block = this.document.blocks[target.blockIndex];
 
     if (block.type === 'text' || target.lineType === 'pre' || target.lineType === 'post') {
-      // Clicking on text/pre/post: switch to raw mode to edit it
       const clickCharIdx = this.cursor.clickToCharIndex(target.lineEl, event.clientX);
       this._switchToRawForTextEdit(target.blockIndex, target.lineIndex, clickCharIdx);
       return;
@@ -444,54 +445,115 @@ class App {
       const labelWidth = block.labels[0].length + 1;
       const contentCharIdx = Math.max(0, charIdx - labelWidth);
 
-      this.cursor.charIndex = contentCharIdx;
       this.cursor.stringIndex = parseInt(target.lineEl.dataset.string, 10) || 0;
 
-      // Snap cursor to a column position based on click location.
+      // Position cursor at the exact column under the click (no snapping)
       ensureColumns(block);
 
-      // Check if click is past the end of all columns (past the final |)
       const lastCol = block.columns.length > 0 ? block.columns[block.columns.length - 1] : null;
       const endOfContent = lastCol ? lastCol.position + lastCol.width : 0;
 
       if (contentCharIdx >= endOfContent && lastCol) {
-        // Click is past the end — position cursor at "end of row"
         this.cursor.columnIndex = block.columns.length;
         this.cursor.charIndex = endOfContent;
       } else {
-        // Snap to nearest note or bar column (skip rests).
-        const meaningfulCols = block.columns
-          .map((col, i) => ({ col, i }))
-          .filter(({ col }) => col.type !== 'rest');
-
-        if (meaningfulCols.length > 0) {
-          let bestEntry = meaningfulCols[0];
-          let bestDist = Infinity;
-          for (const entry of meaningfulCols) {
-            const dist = Math.abs(entry.col.position - contentCharIdx);
-            if (dist < bestDist) {
-              bestDist = dist;
-              bestEntry = entry;
-            }
+        // Find the column at the click position
+        let clickCol = 0;
+        for (let i = 0; i < block.columns.length; i++) {
+          const col = block.columns[i];
+          if (contentCharIdx < col.position + col.width) {
+            clickCol = i;
+            break;
           }
-          // If click is past a note (in its trailing rest), snap to the NEXT meaningful col
-          if (bestEntry.col.position < contentCharIdx) {
-            const afterCols = meaningfulCols.filter(e => e.col.position >= contentCharIdx);
-            if (afterCols.length > 0) {
-              bestEntry = afterCols[0];
-            }
-          }
-          this.cursor.columnIndex = bestEntry.i;
-          this.cursor.charIndex = bestEntry.col.position;
-        } else if (block.columns.length > 0) {
-          this.cursor.columnIndex = 0;
-          this.cursor.charIndex = 0;
+          clickCol = i + 1;
         }
+        this.cursor.columnIndex = Math.min(clickCol, block.columns.length);
+        this.cursor.charIndex = this.cursor.columnIndex < block.columns.length
+          ? block.columns[this.cursor.columnIndex].position
+          : endOfContent;
       }
     }
 
+    const rawClickCol = this.cursor.columnIndex;
+
+    // Handle selection: shift-click extends, normal click clears and sets anchor
+    const mode = this.getActiveMode();
+    if (event.shiftKey && mode._ensureSelAnchor) {
+      mode._ensureSelAnchor();
+      if (mode._updateSelectionDisplay) mode._updateSelectionDisplay();
+    } else {
+      if (mode._clearSelection) mode._clearSelection();
+      // Start potential drag selection using the raw (unsnapped) column
+      this._mouseDownCol = rawClickCol;
+      this._isDragging = true;
+    }
+
+    event.preventDefault();
     this.updateCursor();
     document.getElementById('tab-editor').focus();
+  }
+
+  _onEditorMouseMove(event) {
+    if (!this._isDragging || this.activeMode.name === 'raw') return;
+    if (this._mouseDownCol === undefined) return;
+
+    const col = this._getColumnFromMouseEvent(event);
+    if (col === null) return;
+
+    const mode = this.getActiveMode();
+    // Create/update selection (even if same column, to highlight the anchor)
+    if (mode._selAnchorCol === null || mode._selAnchorCol === undefined) {
+      mode._selAnchorCol = this._mouseDownCol;
+    }
+    this.cursor.columnIndex = col;
+    this._syncCursorFromColumn();
+    if (mode._updateSelectionDisplay) mode._updateSelectionDisplay();
+    this.updateCursor();
+  }
+
+  _onEditorMouseUp(event) {
+    this._isDragging = false;
+    this._mouseDownCol = undefined;
+  }
+
+  /** Get the raw column index from a mouse event (including rests, for selection). */
+  _getColumnFromMouseEvent(event) {
+    const target = this.editor.findClickTarget(event);
+    if (!target) return null;
+
+    const block = this.document.blocks[target.blockIndex];
+    if (!block || block.type !== 'tabrow') return null;
+    if (target.blockIndex !== this.cursor.blockIndex) return null;
+
+    const charIdx = this.cursor.clickToCharIndex(target.lineEl, event.clientX);
+    const labelWidth = block.labels[0].length + 1;
+    const contentCharIdx = Math.max(0, charIdx - labelWidth);
+
+    ensureColumns(block);
+
+    const lastCol = block.columns[block.columns.length - 1];
+    const endOfContent = lastCol ? lastCol.position + lastCol.width : 0;
+    if (contentCharIdx >= endOfContent) return block.columns.length;
+
+    // Find the column at the click position (including rests)
+    for (let i = 0; i < block.columns.length; i++) {
+      const col = block.columns[i];
+      const colEnd = col.position + col.width;
+      if (contentCharIdx >= col.position && contentCharIdx < colEnd) return i;
+      if (contentCharIdx < col.position) return i;
+    }
+
+    return block.columns.length;
+  }
+
+  _syncCursorFromColumn() {
+    const block = this.document.blocks[this.cursor.blockIndex];
+    if (!block || !block.columns || block.columns.length === 0) {
+      this.cursor.charIndex = 0;
+      return;
+    }
+    const idx = Math.min(this.cursor.columnIndex, block.columns.length - 1);
+    this.cursor.charIndex = block.columns[idx].position;
   }
 }
 

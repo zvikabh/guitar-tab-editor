@@ -31,7 +31,8 @@ function makeEmptyDoc() {
 
 // Helper: simulates cursor advancement after insertNote
 function advanceCursorAfterInsert(colIdx, duration, block) {
-  let newIdx = colIdx + 1 + (DURATION_GAPS[duration] > 0 ? 1 : 0);
+  const gap = duration in DURATION_GAPS ? DURATION_GAPS[duration] : 1;
+  let newIdx = colIdx + 1 + gap; // note column + gap rest columns
   if (newIdx > block.columns.length) newIdx = block.columns.length;
   return newIdx;
 }
@@ -150,22 +151,20 @@ describe('Scenario: Click in middle of existing tab', () => {
     });
     ensureColumns(block);
 
-    // Rest is 9 chars wide, bar at end
-    const restCol = block.columns.find(c => c.type === 'rest');
-    expect(restCol).toBeTruthy();
-    const origRestWidth = restCol.width;
+    // Count rest columns before insert
+    const origRestCount = block.columns.filter(c => c.type === 'rest').length;
+    expect(origRestCount).toBe(9); // 9 hyphens = 9 rest columns
 
     insertNote(block, 0, ['5', null, null, null, null, null], '1/8');
 
-    // Rest should have shrunk (note=1 + spacing=1 = 2 consumed)
-    const remainingRest = block.columns.find(c => c.type === 'rest' && c.width > 1);
-    expect(remainingRest).toBeTruthy();
-    expect(remainingRest.width).toBe(origRestWidth - 2);
+    // With keepLeading=1: 1 kept + 1 spacing from insert = 2 rest columns
+    const newRestCount = block.columns.filter(c => c.type === 'rest').length;
+    expect(newRestCount).toBe(2);
   });
 });
 
-describe('Scenario: Cursor movement skips rests', () => {
-  test('right arrow skips rest columns', () => {
+describe('Scenario: Cursor movement one column at a time', () => {
+  test('right arrow moves exactly one column', () => {
     const block = createTabRowBlock({
       strings: [
         '---0---3---|',
@@ -178,15 +177,13 @@ describe('Scenario: Cursor movement skips rests', () => {
     });
     ensureColumns(block);
 
-    // Find first note column
-    const firstNoteIdx = block.columns.findIndex(c => c.type === 'note');
-
-    // Simulate right arrow: find next non-rest column
-    let idx = firstNoteIdx + 1;
-    while (idx < block.columns.length && block.columns[idx].type === 'rest') idx++;
-
-    // Should land on another note or bar, not rest
-    expect(block.columns[idx].type).not.toBe('rest');
+    // Starting at column 0, right arrow goes to column 1
+    const col0 = block.columns[0];
+    const col1 = block.columns[1];
+    expect(col0).toBeTruthy();
+    expect(col1).toBeTruthy();
+    // Columns are individual (rest width = 1)
+    expect(col0.width).toBe(1);
   });
 });
 

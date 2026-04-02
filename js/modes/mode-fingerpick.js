@@ -30,6 +30,7 @@ export class FingerpickEditMode extends BaseTabEditMode {
     this.app.ensureCursorOnTabRow();
     this.app.editor.renderAll();
     this.app.updateCursor();
+    this._activateClipboard();
   }
 
   deactivate() {
@@ -37,6 +38,7 @@ export class FingerpickEditMode extends BaseTabEditMode {
       document.removeEventListener('keydown', this._docKeyHandler);
       this._docKeyHandler = null;
     }
+    this._deactivateClipboard();
     return true;
   }
 
@@ -85,8 +87,8 @@ export class FingerpickEditMode extends BaseTabEditMode {
     }
 
     switch (event.key) {
-      case 'ArrowLeft': event.preventDefault(); this._moveCursorLeft(); break;
-      case 'ArrowRight': event.preventDefault(); this._moveCursorRight(); break;
+      case 'ArrowLeft': event.preventDefault(); this._moveCursorLeft(event.shiftKey); break;
+      case 'ArrowRight': event.preventDefault(); this._moveCursorRight(event.shiftKey); break;
       case 'ArrowUp':
         event.preventDefault();
         if (cursor.stringIndex > 0) { cursor.stringIndex--; this.app.updateCursor(); }

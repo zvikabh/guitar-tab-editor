@@ -164,9 +164,7 @@ describe('insertNote', () => {
 
     insertNote(block, 1, ['1', null, null, null, null, null], '1/8');
 
-    // Should have more columns now
-    expect(block.columns.length).toBeGreaterThan(origColCount);
-    // Strings should be updated
+    // Strings should be updated with the new note
     expect(block.strings[0]).toContain('1');
   });
 

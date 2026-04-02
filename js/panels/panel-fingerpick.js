@@ -34,7 +34,6 @@ export class FingerpickPanel {
 
     this._miniStringsEl = this._buildMiniStrings();
     centerGroup.appendChild(this._miniStringsEl);
-    centerGroup.appendChild(this._buildCustomChordInput());
     this._chordTableEl = this._buildChordTable();
     centerGroup.appendChild(this._chordTableEl);
 
@@ -144,27 +143,6 @@ export class FingerpickPanel {
     table.appendChild(tbody);
     tableWrapper.appendChild(table);
     return tableWrapper;
-  }
-
-  _buildCustomChordInput() {
-    const div = document.createElement('div');
-    div.className = 'custom-chord-input d-flex flex-column gap-1 p-1';
-    div.innerHTML = `
-      <label class="small text-muted">Custom:</label>
-      <input type="text" class="form-control form-control-sm" id="customChordName"
-             placeholder="e.g. Fmaj7add9" style="width:100px">
-    `;
-
-    this._customInput = div.querySelector('#customChordName');
-    this._customInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        this._onCustomChordSubmit();
-      }
-    });
-    this._customInput.addEventListener('blur', () => this._onCustomChordSubmit());
-
-    return div;
   }
 
   _buildMiniStrings() {
@@ -403,37 +381,6 @@ export class FingerpickPanel {
     }
 
     document.getElementById('tab-editor')?.focus();
-  }
-
-  _onCustomChordSubmit() {
-    const name = this._customInput.value.trim();
-    if (!name) return;
-
-    const chord = lookupChord(name);
-    if (chord) {
-      this._selectChord(chord.name);
-      this._customInput.value = '';
-    } else {
-      // Chord not in database — prompt for manual fret entry
-      const input = prompt(
-        `Chord "${name}" not found. Enter fret positions (e B G D A E), use x for unplayed:\n` +
-        `Example: 0 1 2 2 0 x`
-      );
-      if (input) {
-        const parts = input.trim().split(/\s+/);
-        if (parts.length === 6) {
-          const frets = parts.map(p => p === 'x' || p === 'X' ? null : parseInt(p, 10));
-          if (frets.every(f => f === null || (!isNaN(f) && f >= 0 && f <= 24))) {
-            // Add to database temporarily
-            CHORD_DB[name] = { frets };
-            this._selectChord(name);
-            this._customInput.value = '';
-            return;
-          }
-        }
-        alert('Invalid fret positions. Use 6 space-separated numbers (0-24) or x.');
-      }
-    }
   }
 
   _updateMiniDiagram() {

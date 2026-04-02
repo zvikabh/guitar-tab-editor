@@ -87,6 +87,10 @@ body {
   background: rgba(0, 100, 200, 0.02);
 }
 
+.block-tabrow {
+  user-select: none;
+}
+
 .line {
   min-height: 1.4em;
 }
@@ -113,7 +117,8 @@ body {
   min-height: 1.4em;
 }
 
-.raw-selection {
+.raw-selection,
+.tab-selection {
   position: absolute;
   background: rgba(0, 102, 204, 0.2);
   pointer-events: none;
@@ -322,10 +327,6 @@ body {
 
 .mini-chord-name {
   color: #0d6efd;
-}
-
-.custom-chord-input {
-  min-width: 100px;
 }
 
 /* ===== Chord search dialog ===== */

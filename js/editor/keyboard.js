@@ -40,8 +40,17 @@ export class KeyboardHandler {
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-    // Copy/Cut/Paste: let native clipboard events handle them (don't intercept)
-    if (['c', 'v', 'x'].includes(event.key)) return;
+    // Copy/Cut: let native clipboard events handle them
+    if (['c', 'x'].includes(event.key)) return;
+    // Paste: handle via keydown to prevent double-paste from browser + our handler
+    if (event.key === 'v') {
+      event.preventDefault();
+      const mode = this.app.getActiveMode();
+      if (mode && mode._handlePasteFromKeyboard) {
+        mode._handlePasteFromKeyboard();
+      }
+      return;
+    }
 
     // Select All: delegate to mode
     if (event.key === 'a') {

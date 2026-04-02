@@ -80,6 +80,7 @@ export class Toolbar {
     radios.forEach(radio => {
       radio.addEventListener('change', (e) => {
         this.app.noteLength = e.target.value;
+        document.getElementById('tab-editor')?.focus();
       });
     });
   }
