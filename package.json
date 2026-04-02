@@ -1,0 +1,19 @@
+{
+  "name": "guitar-tab-editor",
+  "version": "0.1.0",
+  "description": "A static webapp for writing and editing guitar tablature",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "prepare": "node -e \"const fs=require('fs'),p='.git/hooks/pre-commit';if(fs.existsSync('.git')){fs.mkdirSync('.git/hooks',{recursive:true});fs.writeFileSync(p,'#!/bin/sh\\nnpm test\\n');fs.chmodSync(p,0o755);console.log('Pre-commit hook installed.')}\""
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "@babel/core": "^7.24.0",
+    "@babel/preset-env": "^7.24.0",
+    "babel-jest": "^29.7.0"
+  }
+}

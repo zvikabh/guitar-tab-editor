@@ -1,0 +1,456 @@
+/* ===== Layout ===== */
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+#editor-container {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+  background: #fdfdfd;
+}
+
+/* ===== Toolbar ===== */
+
+#toolbar .icon {
+  vertical-align: middle;
+}
+
+#toolbar .btn-group-sm .btn,
+#toolbar .btn-sm {
+  font-size: 0.8rem;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mode-dependent {
+  transition: opacity 0.15s;
+}
+
+.mode-dependent.disabled-mode {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ===== Panel ===== */
+
+#panel {
+  min-height: 0;
+  transition: min-height 0.2s;
+}
+
+#panel:empty,
+#panel:not(:has(.panel-content:not(.d-none))) {
+  min-height: 0;
+  border-bottom: none !important;
+}
+
+.panel-content {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ===== Editor ===== */
+
+.tab-editor {
+  font-family: 'Source Code Pro', monospace;
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 12px 16px;
+  min-height: 100%;
+  white-space: pre;
+  outline: none;
+  cursor: text;
+}
+
+/* Block styling */
+.block {
+  position: relative;
+}
+
+.block-tabrow {
+  /* Subtle background for tab rows to distinguish from text */
+}
+
+.block-tabrow:hover {
+  background: rgba(0, 100, 200, 0.02);
+}
+
+.line {
+  min-height: 1.4em;
+}
+
+.line-tab {
+  color: #333;
+}
+
+.line-pre {
+  color: #0066cc;
+  font-weight: bold;
+}
+
+.line-post {
+  color: #666;
+  font-style: italic;
+}
+
+.line-text {
+  color: #333;
+}
+
+.line-raw {
+  color: #333;
+  min-height: 1.4em;
+}
+
+/* ===== Cursor ===== */
+
+.cursor {
+  position: absolute;
+  width: 3px;
+  background: #0066cc;
+  pointer-events: none;
+  z-index: 10;
+  display: none;
+}
+
+.cursor.visible {
+  display: block;
+}
+
+.cursor.tab-cursor {
+  background: rgba(0, 102, 204, 0.8);
+  width: 3px;
+}
+
+/* ===== Character measurement ===== */
+
+.char-measure {
+  font-family: 'Source Code Pro', monospace;
+  font-size: 14px;
+  line-height: 1.4;
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+}
+
+/* ===== Selection highlight ===== */
+
+.block .line.selected-line {
+  background: rgba(0, 100, 200, 0.1);
+}
+
+/* ===== Fretboard Panel ===== */
+
+.fretboard-wrapper {
+  overflow-x: auto;
+}
+
+.fretboard-grid {
+  user-select: none;
+}
+
+.fret-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 13px;
+  color: #555;
+  background: #f0f0f0;
+  border-right: 2px solid #333;
+}
+
+.fret-cell {
+  position: relative;
+  height: 24px;
+  border-right: 1px solid #ccc;
+  background: #f8f5f0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.fret-cell:hover {
+  background: #e8e4d8;
+}
+
+.fret-cell.active {
+  background: #cce5ff;
+}
+
+.string-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* Per-string widths: silver e(1px) B(1.5px) G(2px), gold D(1px) A(2px) E(3px) */
+.string-line.string-0 { height: 1px; background: #999; }
+.string-line.string-1 { height: 1.5px; background: #999; }
+.string-line.string-2 { height: 2px; background: #999; }
+.string-line.string-3 { height: 1px; background: #b8860b; }
+.string-line.string-4 { height: 2px; background: #b8860b; }
+.string-line.string-5 { height: 3px; background: #b8860b; }
+
+.fret-number-spacer {
+  /* Empty corner cell below labels */
+}
+
+.fret-number-cell {
+  text-align: center;
+  font-size: 9px;
+  color: #888;
+  padding-top: 2px;
+  user-select: none;
+}
+
+.time-sig-control {
+  min-width: 90px;
+}
+
+/* ===== Fingerpick Panel ===== */
+
+.chord-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chord-table th {
+  padding: 2px 6px;
+  text-align: center;
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  font-size: 11px;
+  color: #666;
+}
+
+.chord-cell {
+  padding: 4px 7px;
+  text-align: center;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  user-select: none;
+  min-width: 48px;
+  font-size: 13px;
+}
+
+.chord-cell:hover {
+  background: #e8e4d8;
+}
+
+.chord-cell.active {
+  background: #0d6efd;
+  color: white;
+  font-weight: bold;
+}
+
+.chord-cell.chord-empty {
+  background: #f8f8f8;
+  cursor: default;
+}
+
+.mini-strings-panel {
+  min-width: 80px;
+  padding: 4px;
+}
+
+.mini-string-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.mini-string-row:hover {
+  background: rgba(0, 100, 200, 0.05);
+}
+
+.mini-string-num {
+  font-size: 10px;
+  color: #999;
+  width: 12px;
+  text-align: center;
+}
+
+.mini-string-line {
+  flex: 1;
+  height: 1px;
+  background: #999;
+  position: relative;
+}
+
+.mini-string-line.string-thick {
+  height: 2px;
+  background: #b8860b;
+}
+
+.mini-fret-marker {
+  font-size: 11px;
+  font-weight: bold;
+  width: 16px;
+  text-align: center;
+  color: #333;
+}
+
+.mini-fret-marker.muted {
+  color: #ccc;
+}
+
+.mini-chord-name {
+  color: #0d6efd;
+}
+
+.custom-chord-input {
+  min-width: 100px;
+}
+
+/* ===== Chord search dialog ===== */
+
+.chord-search-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.2);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+}
+
+.chord-search-dialog {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  padding: 16px 24px;
+  min-width: 280px;
+}
+
+.chord-search-label {
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 6px;
+  color: #333;
+}
+
+.chord-search-input {
+  width: 100%;
+  font-size: 20px;
+  padding: 6px 10px;
+  border: 2px solid #0d6efd;
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+}
+
+.chord-search-input:focus {
+  border-color: #0a58ca;
+  box-shadow: 0 0 0 3px rgba(13,110,253,0.25);
+}
+
+.chord-search-match {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #333;
+  min-height: 20px;
+}
+
+.chord-search-match.no-match {
+  color: #999;
+  font-style: italic;
+}
+
+.chord-search-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #999;
+}
+
+/* ===== Fingerpick toast message ===== */
+
+.fp-toast {
+  display: none;
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f8d7da;
+  color: #842029;
+  border: 1px solid #f5c2c7;
+  border-radius: 6px;
+  padding: 10px 24px;
+  font-size: 16px;
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* ===== Responsive ===== */
+
+@media (max-width: 576px) {
+  .tab-editor {
+    font-size: 11px;
+    padding: 8px;
+  }
+
+  .char-measure {
+    font-size: 11px;
+  }
+
+  #toolbar .btn-group-sm .btn {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.35rem;
+  }
+
+  .panel-content {
+    max-height: 150px;
+  }
+}
+
+@media (max-width: 768px) {
+  .tab-editor {
+    font-size: 12px;
+  }
+
+  .char-measure {
+    font-size: 12px;
+  }
+}
+
+/* ===== Misc ===== */
+
+/* Error overlay for Raw Edit validation */
+.parse-error-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #f8d7da;
+  color: #842029;
+  border-bottom: 1px solid #f5c2c7;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+}
+
+.parse-error-banner button {
+  margin-left: 12px;
+}

@@ -1,1 +1,4 @@
+memory/
+node_modules/
 tabs/
+.DS_Store
