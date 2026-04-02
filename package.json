@@ -5,8 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "prepare": "node -e \"const fs=require('fs'),p='.git/hooks/pre-commit';if(fs.existsSync('.git')){fs.mkdirSync('.git/hooks',{recursive:true});fs.writeFileSync(p,'#!/bin/sh\\nnpm test\\n');fs.chmodSync(p,0o755);console.log('Pre-commit hook installed.')}\""
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
