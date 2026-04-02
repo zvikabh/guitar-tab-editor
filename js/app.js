@@ -190,6 +190,7 @@ class App {
     const doc = parseTabText(result.text);
     this.undoManager.clear();
     this.document = doc;
+    this.editor.document = doc;
     this.cursor.blockIndex = 0;
     this.cursor.lineIndex = 0;
     this.cursor.charIndex = 0;
@@ -209,7 +210,23 @@ class App {
   async save() {
     if (!this.document) return;
     const text = renderDocument(this.document);
-    await this.fileIO.save(text);
+
+    // Suggest filename from the first non-empty text line
+    let suggestedName = this.fileIO.fileName;
+    if (!suggestedName || suggestedName === 'untitled.txt') {
+      for (const block of this.document.blocks) {
+        if (block.type === 'text') {
+          const firstLine = block.lines.find(l => l.trim());
+          if (firstLine) {
+            // Sanitize: remove characters not suitable for filenames
+            suggestedName = firstLine.trim().replace(/[/\\:*?"<>|]/g, '') + '.txt';
+            break;
+          }
+        }
+      }
+    }
+
+    await this.fileIO.save(text, suggestedName);
   }
 
   // --- Undo/Redo ---

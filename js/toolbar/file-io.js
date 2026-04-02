@@ -22,14 +22,17 @@ export class FileIO {
   }
 
   /**
-   * Save text to file.
+   * Save text to file. Shows a save dialog for filename.
    * @param {string} text
+   * @param {string} [suggestedName] - Default filename suggestion
    */
-  async save(text) {
-    if (this.fileHandle) {
-      return this._saveFSA(text);
+  async save(text, suggestedName) {
+    const defaultName = suggestedName || this.fileName || 'untitled.txt';
+
+    if (window.showSaveFilePicker) {
+      return this._saveFSADialog(text, defaultName);
     }
-    return this._saveFallback(text);
+    return this._saveFallbackDialog(text, defaultName);
   }
 
   // --- File System Access API ---
@@ -53,15 +56,41 @@ export class FileIO {
     }
   }
 
-  async _saveFSA(text) {
+  async _saveFSADialog(text, defaultName) {
     try {
-      const writable = await this.fileHandle.createWritable();
+      const handle = await window.showSaveFilePicker({
+        suggestedName: defaultName,
+        types: [{
+          description: 'Tab files',
+          accept: { 'text/plain': ['.txt', '.tab'] },
+        }],
+      });
+      this.fileHandle = handle;
+      this.fileName = handle.name;
+      const writable = await handle.createWritable();
       await writable.write(text);
       await writable.close();
     } catch (e) {
-      // Fall back to download if write fails
-      this._saveFallback(text);
+      if (e.name === 'AbortError') return; // User cancelled
+      // Fall back to download
+      this._saveFallbackDialog(text, defaultName);
     }
+  }
+
+  _saveFallbackDialog(text, defaultName) {
+    const fileName = prompt('Save as:', defaultName);
+    if (!fileName) return; // User cancelled
+
+    this.fileName = fileName;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // --- Fallback ---
