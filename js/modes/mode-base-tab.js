@@ -20,6 +20,7 @@ import {
   syncStringsFromColumns,
   columnsToStrings,
   parseColumns,
+  createDocument,
   createTextBlock,
   createTabRowBlock,
   DURATION_GAPS,
@@ -355,7 +356,8 @@ export class BaseTabEditMode {
     return { startCol: Math.min(a, b), endCol: Math.max(a, b) };
   }
 
-  /** Get the text representation of the selected columns. */
+  /** Get the text representation of the selected columns, including pre/postLines.
+   *  Format matches file save format (same as renderer output). */
   _getSelectedText() {
     const range = this._getSelectionRange();
     if (!range) return '';
@@ -366,12 +368,57 @@ export class BaseTabEditMode {
     const selectedCols = block.columns.slice(range.startCol, range.endCol);
     if (selectedCols.length === 0) return '';
 
-    // Render just the selected columns as tab text
+    // Compute character range of selection
+    const startPos = range.startCol < block.columns.length
+      ? block.columns[range.startCol].position : 0;
+    const endPos = range.endCol < block.columns.length
+      ? block.columns[range.endCol].position
+      : (block.columns.length > 0
+        ? block.columns[block.columns.length - 1].position + block.columns[block.columns.length - 1].width
+        : 0);
+
     const strings = columnsToStrings(selectedCols);
-    const lines = [];
-    for (let s = 0; s < 6; s++) {
-      lines.push(`${block.labels[s]}|${strings[s]}`);
-    }
+
+    // Pre/postLines in the original file are aligned with the full rendered tab line:
+    //   rendered: label(1) + "|"(1) + content
+    //   pre/post: aligned character-by-character with the rendered line
+    //
+    // The copy renders as: label + sep + selectedContent
+    //   where sep = "|" normally, or "" if content starts with ‖:
+    //
+    // Strategy: extract the content-aligned portion of pre/post from the original,
+    // then prepend spaces for the copy's label portion.
+    const copiedContent = strings[0] || '';
+    const copyHasSep = !(copiedContent.startsWith('‖:') || copiedContent.startsWith(':‖'));
+    const copyLabelLen = block.labels[0].length + (copyHasSep ? 1 : 0);
+
+    // In the original, content position startPos maps to rendered position:
+    const origLabelOffset = block.labels[0].length + 1;
+    const origContentStart = startPos + origLabelOffset;
+    const origContentEnd = endPos + origLabelOffset;
+
+    // Extract the content-aligned portion, then prepend spaces for the copy's label
+    const tempBlock = createTabRowBlock({
+      preLines: block.preLines.map(l => {
+        const contentPart = l.padEnd(origContentEnd).substring(origContentStart, origContentEnd);
+        return ' '.repeat(copyLabelLen) + contentPart;
+      }),
+      strings,
+      postLines: block.postLines.map(l => {
+        const contentPart = l.padEnd(origContentEnd).substring(origContentStart, origContentEnd);
+        return ' '.repeat(copyLabelLen) + contentPart;
+      }),
+      rightAnnotations: ['', '', '', '', '', ''],
+      labels: [...block.labels],
+    });
+
+    // Render the temp block using the renderer for correct label/separator handling
+    const tempDoc = createDocument([tempBlock]);
+    let rendered = renderDocument(tempDoc);
+    // Remove trailing newline
+    if (rendered.endsWith('\n')) rendered = rendered.slice(0, -1);
+    // Remove empty pre/post lines
+    const lines = rendered.split('\n').filter(l => l.trim() || l.match(/^[eBGDAE][|‖]/));
     return lines.join('\n');
   }
 
@@ -398,42 +445,80 @@ export class BaseTabEditMode {
     this._refreshAfterEdit();
   }
 
-  /** Paste tab text at cursor position. */
+  /** Paste tab text at cursor position. Parses like a file to extract pre/postLines. */
   _pasteTabText(text) {
     const block = this.app.document.blocks[this.app.cursor.blockIndex];
     if (!block || block.type !== 'tabrow') return;
 
-    // Try to parse the pasted text as tab lines
-    const lines = text.split('\n');
-    // Extract string contents (strip label| prefix)
-    const tabContents = [];
-    for (const line of lines) {
-      const m = line.match(/^[a-gA-G][#b♭♯]?[|‖](.*)/);
-      if (m) {
-        tabContents.push(m[1]);
-      }
-    }
-    if (tabContents.length !== 6) return; // not valid tab text
+    // Parse the pasted text like a file
+    const parsed = parseTabText(text + '\n');
+    const pastedRow = parsed.blocks.find(b => b.type === 'tabrow');
+    if (!pastedRow) return;
 
-    // Parse the pasted content into columns
-    const pastedCols = parseColumns(tabContents);
+    ensureColumns(pastedRow);
+    const pastedCols = pastedRow.columns;
     if (pastedCols.length === 0) return;
 
     this._pushUndoSnapshot();
     ensureColumns(block);
 
+    // Compute the insert position and character position
+    let insertColIdx;
     if (this._hasSelection()) {
       const range = this._getSelectionRange();
+      insertColIdx = range.startCol;
+    } else {
+      insertColIdx = Math.min(this.app.cursor.columnIndex, block.columns.length);
+    }
+
+    const charPos = insertColIdx < block.columns.length
+      ? block.columns[insertColIdx].position
+      : (block.columns.length > 0
+        ? block.columns[block.columns.length - 1].position + block.columns[block.columns.length - 1].width
+        : 0);
+
+    // Splice columns
+    if (this._hasSelection()) {
+      const range = this._getSelectionRange();
+      block._editCharPos = charPos;
       block.columns.splice(range.startCol, range.endCol - range.startCol, ...pastedCols);
       this.app.cursor.columnIndex = range.startCol + pastedCols.length;
       this._selAnchorCol = null;
     } else {
-      const colIdx = Math.min(this.app.cursor.columnIndex, block.columns.length);
-      block.columns.splice(colIdx, 0, ...pastedCols);
-      this.app.cursor.columnIndex = colIdx + pastedCols.length;
+      block._editCharPos = charPos;
+      block.columns.splice(insertColIdx, 0, ...pastedCols);
+      this.app.cursor.columnIndex = insertColIdx + pastedCols.length;
     }
 
     syncStringsFromColumns(block);
+    // syncStringsFromColumns inserted spaces at charPos for pre/postLines.
+    // Now overwrite those spaces with the actual pasted pre/post content.
+    // Recompute charPos from the actual column positions after sync.
+    const actualCharPos = insertColIdx < block.columns.length
+      ? block.columns[insertColIdx].position : 0;
+    const pastedWidth = columnsToStrings(pastedCols)[0].length;
+
+    for (let i = 0; i < pastedRow.preLines.length; i++) {
+      const segment = pastedRow.preLines[i];
+      if (i < block.preLines.length) {
+        const line = block.preLines[i];
+        block.preLines[i] = line.substring(0, actualCharPos) + segment +
+          line.substring(actualCharPos + pastedWidth);
+      } else {
+        block.preLines.push(' '.repeat(actualCharPos) + segment);
+      }
+    }
+
+    for (let i = 0; i < pastedRow.postLines.length; i++) {
+      const segment = pastedRow.postLines[i];
+      if (i < block.postLines.length) {
+        const line = block.postLines[i];
+        block.postLines[i] = line.substring(0, actualCharPos) + segment +
+          line.substring(actualCharPos + pastedWidth);
+      } else {
+        block.postLines.push(' '.repeat(actualCharPos) + segment);
+      }
+    }
     this._syncCursorCharFromColumn();
     this._refreshAfterEdit();
   }

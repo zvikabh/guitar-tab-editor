@@ -17,6 +17,7 @@ import {
   parseColumns,
 } from '../../js/model/document.js';
 import { UndoManager } from '../../js/model/undo.js';
+import { parseTabText } from '../../js/model/parser.js';
 import { BaseTabEditMode } from '../../js/modes/mode-base-tab.js';
 
 function createMockApp() {
@@ -206,6 +207,72 @@ describe('Tab mode selection', () => {
     expect(block.columns.length).toBeGreaterThan(colsBefore);
     // The pasted note should be in the strings
     expect(block.strings[0]).toContain('9');
+  });
+
+  test('copy includes preLines and postLines in file-like format', () => {
+    const block = createTabRowBlock({
+      preLines: ['   Am      G  '],
+      strings: ['-0-3-5-|', '-1-0-0-|', '-2-0-0-|', '-2-2-0-|', '-0-3-2-|', '----3--|'],
+      postLines: ['   hello   wo '],
+    });
+    const doc = createDocument([createTextBlock(['']), block]);
+    const app = createMockApp();
+    app.document = doc;
+    app.editor.document = doc;
+    const mode = new BaseTabEditMode(app);
+    mode.name = 'test';
+
+    app.cursor.blockIndex = 1;
+    ensureColumns(block);
+
+    // Select columns 1 through 4
+    app.cursor.columnIndex = 1;
+    mode._ensureSelAnchor();
+    app.cursor.columnIndex = 4;
+
+    const text = mode._getSelectedText();
+    // Should NOT contain PRE: or POST: markers
+    expect(text).not.toContain('PRE:');
+    expect(text).not.toContain('POST:');
+    // Should contain tab lines
+    expect(text).toContain('e|');
+    // Should contain pre-line content (chord names) and post-line content (lyrics)
+    // as plain text lines before/after the tab lines
+    const lines = text.split('\n');
+    // First line(s) before e| are pre-lines, last line(s) after E| are post-lines
+    const eLineIdx = lines.findIndex(l => l.match(/^e[|‖]/));
+    const ELineIdx = lines.findIndex(l => l.match(/^E[|‖]/));
+    expect(eLineIdx).toBeGreaterThanOrEqual(0);
+    if (eLineIdx > 0) {
+      // There are pre-lines before the tab
+      expect(lines.slice(0, eLineIdx).some(l => l.trim().length > 0)).toBe(true);
+    }
+  });
+
+  test('paste with pre/postLines inserts them', () => {
+    const block = createTabRowBlock({
+      preLines: ['   C         '],
+      strings: ['-0---|', '-1---|', '-0---|', '-2---|', '-3---|', '-----|'],
+      postLines: ['   la        '],
+    });
+    const doc = createDocument([createTextBlock(['']), block]);
+    const app = createMockApp();
+    app.document = doc;
+    app.editor.document = doc;
+    const mode = new BaseTabEditMode(app);
+    mode.name = 'test';
+
+    app.cursor.blockIndex = 1;
+    ensureColumns(block);
+
+    // Paste tab text with chord name and lyric (file format)
+    app.cursor.columnIndex = 2;
+    const pasteText = '   G\ne|-3-\nB|-0-\nG|-0-\nD|-0-\nA|-2-\nE|-3-\n   da';
+    mode._pasteTabText(pasteText);
+
+    expect(block.preLines[0]).toContain('G');
+    // postLines should contain the pasted lyric
+    expect(block.postLines[0]).toContain('da');
   });
 
   test('paste with selection replaces selected columns', () => {

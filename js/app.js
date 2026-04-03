@@ -151,7 +151,7 @@ class App {
     } else if (block.type === 'tabrow') {
       // 6-line cursor for tab rows in note/fingerpick mode
       // charIndex is relative to string content; display needs label prefix offset
-      const labelWidth = block.labels[0].length + 1; // e.g., "e|" = 2
+      const labelWidth = this._labelWidth(block); // e.g., "e|" = 2
       this.cursor.positionAtTabRow(blockEl, this.cursor.charIndex + labelWidth);
     }
   }
@@ -332,6 +332,13 @@ class App {
     if (tooltip) tooltip.hide();
 
     setTimeout(() => toast.remove(), 2000);
+  }
+
+  /** Compute the rendered label prefix width for a tab row block. */
+  _labelWidth(block) {
+    const content = block.strings[0] || '';
+    const hasSep = !(content.startsWith('‖:') || content.startsWith(':‖'));
+    return block.labels[0].length + (hasSep ? 1 : 0);
   }
 
   _escapeHtml(text) {
@@ -533,7 +540,7 @@ class App {
     } else if (target.lineType === 'tab' && block.type === 'tabrow') {
       // Clicking on a tab line in note/fingerpick mode
       const charIdx = this.cursor.clickToCharIndex(target.lineEl, event.clientX);
-      const labelWidth = block.labels[0].length + 1;
+      const labelWidth = this._labelWidth(block);
       const contentCharIdx = Math.max(0, charIdx - labelWidth);
 
       this.cursor.stringIndex = parseInt(target.lineEl.dataset.string, 10) || 0;
@@ -617,7 +624,7 @@ class App {
     if (target.blockIndex !== this.cursor.blockIndex) return null;
 
     const charIdx = this.cursor.clickToCharIndex(target.lineEl, event.clientX);
-    const labelWidth = block.labels[0].length + 1;
+    const labelWidth = this._labelWidth(block);
     const contentCharIdx = Math.max(0, charIdx - labelWidth);
 
     ensureColumns(block);
