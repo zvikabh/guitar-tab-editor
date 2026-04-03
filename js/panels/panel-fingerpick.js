@@ -2,7 +2,7 @@
  * Fingerpick Edit panel: chord table + custom chord textbox + mini string schematic.
  */
 
-import { CHORD_TABLE, CHORD_TABLE_COLUMNS, CHORD_DB, lookupChord } from '../model/chords.js';
+import { CHORD_TABLE, CHORD_TABLE_COLUMNS, CHORD_DB, EXTENDED_CHORDS, lookupChord } from '../model/chords.js';
 
 const STRING_NAMES = ['e', 'B', 'G', 'D', 'A', 'E'];
 
@@ -91,18 +91,7 @@ export class FingerpickPanel {
     const table = document.createElement('table');
     table.className = 'chord-table';
 
-    // Header row with column names
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-    for (const colName of CHORD_TABLE_COLUMNS) {
-      const th = document.createElement('th');
-      th.textContent = colName;
-      headerRow.appendChild(th);
-    }
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    // Data rows
+    // Data rows (no header — chords are self-explanatory)
     const tbody = document.createElement('tbody');
     // Determine which columns are "overflow" (sharp/flat roots)
     const overflowCols = new Set([1, 3, 6, 8, 10]); // C#, E♭, F#, A♭, B♭
@@ -142,6 +131,12 @@ export class FingerpickPanel {
     }
     table.appendChild(tbody);
     tableWrapper.appendChild(table);
+
+    const tip = document.createElement('div');
+    tip.className = 'chord-table-tip';
+    tip.textContent = 'Tip: To select these or any other chords, start typing the chord name.';
+    tableWrapper.appendChild(tip);
+
     return tableWrapper;
   }
 
@@ -294,9 +289,9 @@ export class FingerpickPanel {
    * - Click on the muted X: set to open (0)
    */
   _onStringRightClick(stringIdx, event) {
+    // If no chord selected, create a blank one to start editing
     if (!this.activeChord) {
-      this._showMessage('Select a chord first.');
-      return;
+      this.activeChord = { name: 'Custom', frets: [null, null, null, null, null, null] };
     }
 
     const { fretSpacing, leftPad, numFrets } = this._diagramParams;
@@ -342,21 +337,31 @@ export class FingerpickPanel {
       }
     }
 
-    // Update the chord in the database (so it persists for this session)
-    if (CHORD_DB[this.activeChord.name]) {
-      CHORD_DB[this.activeChord.name].frets = [...this.activeChord.frets];
-    }
+    // Reverse lookup BEFORE saving — find if the new voicing matches a known chord.
+    // Don't save back to the original DB entry (that would corrupt the standard voicing).
+    const matchedName = this._reverseLookupChord(this.activeChord.frets);
 
     // Refresh the diagram
     this._updateMiniDiagram();
 
-    // Update the chord name display to show it's modified
+    // Update name display and highlight
     const nameEl = this.containerEl.querySelector('#activeChordName');
-    if (nameEl) {
-      const name = this.activeChord.name;
-      if (!nameEl.textContent.endsWith('*')) {
-        nameEl.textContent = name + '*';
-      }
+    this.containerEl.querySelectorAll('.chord-cell.active').forEach(el => el.classList.remove('active'));
+
+    if (matchedName && matchedName !== this.activeChord.name) {
+      // Matches a different known chord
+      this.activeChord.name = matchedName;
+      if (nameEl) nameEl.textContent = matchedName;
+      const cell = this.containerEl.querySelector(`.chord-cell[data-chord="${matchedName}"]`);
+      if (cell) cell.classList.add('active');
+    } else if (matchedName) {
+      // Still matches the same chord (e.g., toggled back to original)
+      if (nameEl) nameEl.textContent = matchedName;
+      const cell = this.containerEl.querySelector(`.chord-cell[data-chord="${matchedName}"]`);
+      if (cell) cell.classList.add('active');
+    } else {
+      // No match — show modified name
+      if (nameEl) nameEl.textContent = this.activeChord.name + '*';
     }
   }
 
@@ -381,6 +386,20 @@ export class FingerpickPanel {
     }
 
     document.getElementById('tab-editor')?.focus();
+  }
+
+  /** Reverse-lookup: find a chord name whose frets match the given voicing. */
+  _reverseLookupChord(frets) {
+    // Search table chords first (preferred names), then extended
+    for (const db of [CHORD_DB, EXTENDED_CHORDS]) {
+      for (const [name, chord] of Object.entries(db)) {
+        if (chord.frets.length === 6 &&
+            chord.frets.every((f, i) => f === frets[i])) {
+          return name;
+        }
+      }
+    }
+    return null;
   }
 
   _updateMiniDiagram() {
@@ -553,12 +572,17 @@ export class FingerpickPanel {
       matchEl.textContent = `${chord.name}: ${fretStr}`;
       matchEl.classList.remove('no-match');
     } else {
-      // Try partial match: find chords that start with the input
-      const partial = Object.keys(CHORD_DB).filter(k =>
+      // Try partial match across both databases
+      const allChordNames = [...new Set([...Object.keys(CHORD_DB), ...Object.keys(EXTENDED_CHORDS)])];
+      const partial = allChordNames.filter(k =>
         k.toLowerCase().startsWith(name.toLowerCase())
       );
       if (partial.length > 0) {
         matchEl.textContent = `Suggestions: ${partial.slice(0, 5).join(', ')}`;
+        matchEl.classList.remove('no-match');
+      } else if (name.length >= 2) {
+        // The algorithmic generator can handle it — show an encouraging message
+        matchEl.textContent = 'Press Enter to try generating this chord';
         matchEl.classList.remove('no-match');
       } else {
         matchEl.textContent = 'No match — Enter to define custom chord';
@@ -577,7 +601,7 @@ export class FingerpickPanel {
       if (parts.length === 6) {
         const frets = parts.map(p => p === 'x' || p === 'X' ? null : parseInt(p, 10));
         if (frets.every(f => f === null || (!isNaN(f) && f >= 0 && f <= 24))) {
-          CHORD_DB[name] = { frets };
+          EXTENDED_CHORDS[name] = { frets };
           this._selectChord(name);
           return;
         }

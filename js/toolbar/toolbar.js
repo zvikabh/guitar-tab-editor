@@ -25,6 +25,7 @@ export class Toolbar {
       modeFingerpick: 'Fingerpick Edit — select chord, then pluck strings',
       btnOpen: `Open File (${shortcutLabel('O')})`,
       btnSave: `Save File (${shortcutLabel('S')})`,
+      btnCopy: 'Copy tab to clipboard as rich text',
       btnUndo: `Undo (${shortcutLabel('Z')})`,
       btnRedo: `Redo (${shortcutLabel('Shift+Z')})`,
       len16: 'Sixteenth note (1/16)',
@@ -68,6 +69,7 @@ export class Toolbar {
   _bindFileButtons() {
     document.getElementById('btnOpen').addEventListener('click', () => this.app.open());
     document.getElementById('btnSave').addEventListener('click', () => this.app.save());
+    document.getElementById('btnCopy')?.addEventListener('click', () => this.app.copyAsRichText());
   }
 
   _bindUndoRedo() {

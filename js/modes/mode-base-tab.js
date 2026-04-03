@@ -384,6 +384,8 @@ export class BaseTabEditMode {
     ensureColumns(block);
 
     this._pushUndoSnapshot();
+    block._editCharPos = range.startCol < block.columns.length
+      ? block.columns[range.startCol].position : 0;
     block.columns.splice(range.startCol, range.endCol - range.startCol);
     syncStringsFromColumns(block);
 
@@ -586,11 +588,39 @@ export class BaseTabEditMode {
   }
 
   _handleBackspace(block, cursor, doc) {
-    // Delete the single column immediately left of cursor
+    // Delete the single column immediately left of cursor.
+    // Special case: if the column is a trailing rest after a note, delete
+    // the note and all its trailing rests together (undo the last note entry).
     if (cursor.columnIndex <= 0) return;
 
     this._pushUndoSnapshot();
-    const targetIdx = cursor.columnIndex - 1;
+    let targetIdx = cursor.columnIndex - 1;
+
+    // If target is a rest, check if it's trailing spacing after a note
+    if (block.columns[targetIdx].type === 'rest') {
+      // Walk left past consecutive rests to find if there's a note before them
+      let scanIdx = targetIdx;
+      while (scanIdx >= 0 && block.columns[scanIdx].type === 'rest') scanIdx--;
+      if (scanIdx >= 0 && block.columns[scanIdx].type === 'note') {
+        // Delete the note + all trailing rests between it and cursor
+        const deleteStart = scanIdx;
+        const deleteCount = cursor.columnIndex - scanIdx;
+        block._editCharPos = block.columns[deleteStart].position;
+        block.columns.splice(deleteStart, deleteCount);
+        syncStringsFromColumns(block);
+        cursor.columnIndex = deleteStart;
+
+        if (cursor.columnIndex > block.columns.length) {
+          cursor.columnIndex = block.columns.length;
+        }
+        this._syncCursorCharFromColumn();
+        this._refreshAfterEdit();
+        return;
+      }
+    }
+
+    // Default: delete the single column
+    block._editCharPos = block.columns[targetIdx].position;
     block.columns.splice(targetIdx, 1);
     syncStringsFromColumns(block);
     cursor.columnIndex = targetIdx;
@@ -611,6 +641,7 @@ export class BaseTabEditMode {
     }
 
     this._pushUndoSnapshot();
+    block._editCharPos = block.columns[cursor.columnIndex].position;
     block.columns.splice(cursor.columnIndex, 1);
     syncStringsFromColumns(block);
 

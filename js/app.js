@@ -247,6 +247,97 @@ class App {
     this._dirty = false;
   }
 
+  /**
+   * Copy the entire tab to clipboard as rich text (HTML) with colors and bolding
+   * matching the editor display.
+   */
+  async copyAsRichText() {
+    if (!this.document) return;
+
+    const fontFamily = "'Source Code Pro', monospace";
+    let html = `<pre style="font-family: ${fontFamily}; font-size: 14px; line-height: 1.4;">`;
+
+    for (const block of this.document.blocks) {
+      if (block.type === 'text') {
+        for (const line of block.lines) {
+          if (line.trim()) {
+            html += `<span style="color: #333;">${this._escapeHtml(line)}</span>\n`;
+          } else {
+            html += '\n';
+          }
+        }
+      } else if (block.type === 'tabrow') {
+        // Pre-lines (chord names — blue, bold)
+        for (const line of block.preLines) {
+          html += `<span style="color: #0066cc; font-weight: bold;">${this._escapeHtml(line)}</span>\n`;
+        }
+        // Tab strings
+        for (let s = 0; s < 6; s++) {
+          const label = block.labels[s];
+          const content = block.strings[s];
+          const sep = (content.startsWith('‖:') || content.startsWith(':‖')) ? '' : '|';
+          let text = `${label}${sep}${content}`;
+          if (block.rightAnnotations[s]) {
+            text += ` ${block.rightAnnotations[s]}`;
+          }
+          html += `<span style="color: #333;">${this._escapeHtml(text)}</span>\n`;
+        }
+        // Post-lines (lyrics — blue-ish)
+        for (const line of block.postLines) {
+          html += `<span style="color: #0066ccd0;">${this._escapeHtml(line)}</span>\n`;
+        }
+      }
+    }
+
+    html += '</pre>';
+
+    // Also prepare plain text
+    const plainText = renderDocument(this.document);
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
+        }),
+      ]);
+      this._showCopyToast();
+    } catch (e) {
+      // Fallback: copy plain text
+      const textarea = document.createElement('textarea');
+      textarea.value = plainText;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    document.getElementById('tab-editor')?.focus();
+  }
+
+  _showCopyToast() {
+    // Remove any existing toast
+    const existing = document.querySelector('.copy-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'copy-toast';
+    toast.textContent = 'Tab copied to clipboard';
+    document.body.appendChild(toast);
+
+    // Hide any tooltip on the copy button
+    const btn = document.getElementById('btnCopy');
+    const tooltip = bootstrap.Tooltip.getInstance(btn);
+    if (tooltip) tooltip.hide();
+
+    setTimeout(() => toast.remove(), 2000);
+  }
+
+  _escapeHtml(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   // --- Undo/Redo ---
 
   undo() {

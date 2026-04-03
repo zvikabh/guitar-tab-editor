@@ -368,9 +368,45 @@ export function syncStringsFromColumns(block) {
     }
   }
 
-  // Shift pre/post lines if length changed
+  // Adjust pre/post lines to stay aligned with the tab content
   const delta = newLen - oldLen;
-  if (delta !== 0) {
+  if (delta > 0 && block._editCharPos !== undefined) {
+    // Insertion: add spaces at the edit position
+    const pos = block._editCharPos;
+    block.preLines = block.preLines.map(line => {
+      const padded = line.padEnd(pos, ' ');
+      return padded.substring(0, pos) + ' '.repeat(delta) + padded.substring(pos);
+    });
+    block.postLines = block.postLines.map(line => {
+      const padded = line.padEnd(pos, ' ');
+      return padded.substring(0, pos) + ' '.repeat(delta) + padded.substring(pos);
+    });
+    delete block._editCharPos;
+  } else if (delta < 0 && block._editCharPos !== undefined) {
+    // Deletion: remove characters at the edit position only if ALL lines have spaces there
+    const pos = block._editCharPos;
+    const removeCount = -delta;
+    const allPreSpaces = block.preLines.every(line => {
+      const segment = (line.padEnd(pos + removeCount, ' ')).substring(pos, pos + removeCount);
+      return segment.trim() === '';
+    });
+    const allPostSpaces = block.postLines.every(line => {
+      const segment = (line.padEnd(pos + removeCount, ' ')).substring(pos, pos + removeCount);
+      return segment.trim() === '';
+    });
+    if (allPreSpaces && allPostSpaces) {
+      block.preLines = block.preLines.map(line => {
+        const padded = line.padEnd(pos + removeCount, ' ');
+        return padded.substring(0, pos) + padded.substring(pos + removeCount);
+      });
+      block.postLines = block.postLines.map(line => {
+        const padded = line.padEnd(pos + removeCount, ' ');
+        return padded.substring(0, pos) + padded.substring(pos + removeCount);
+      });
+    }
+    delete block._editCharPos;
+  } else if (delta !== 0) {
+    // Fallback: pad/trim at the end
     block.preLines = block.preLines.map(line => adjustLineLength(line, oldLen, newLen));
     block.postLines = block.postLines.map(line => adjustLineLength(line, oldLen, newLen));
   }
@@ -391,6 +427,12 @@ export function syncStringsFromColumns(block) {
  */
 export function insertNote(block, colIdx, notes, duration = '1/8') {
   ensureColumns(block);
+  // Record the character position of the edit for pre/postLine alignment
+  block._editCharPos = colIdx < block.columns.length
+    ? block.columns[colIdx].position
+    : (block.columns.length > 0
+      ? block.columns[block.columns.length - 1].position + block.columns[block.columns.length - 1].width
+      : 0);
   const gap = duration in DURATION_GAPS ? DURATION_GAPS[duration] : 1;
   const noteWidth = Math.max(1, ...notes.filter(Boolean).map(n => n.length));
   const totalWidth = noteWidth + gap;
@@ -509,6 +551,11 @@ export function setFret(block, colIdx, stringIdx, value) {
  */
 export function insertBarline(block, colIdx) {
   ensureColumns(block);
+  block._editCharPos = colIdx < block.columns.length
+    ? block.columns[colIdx].position
+    : (block.columns.length > 0
+      ? block.columns[block.columns.length - 1].position + block.columns[block.columns.length - 1].width
+      : 0);
 
   const REST_COL = () => ({
     position: 0, width: 1,
@@ -539,6 +586,8 @@ export function insertBarline(block, colIdx) {
  */
 export function insertRepeatStart(block, colIdx) {
   ensureColumns(block);
+  block._editCharPos = colIdx < block.columns.length
+    ? block.columns[colIdx].position : 0;
 
   const repeatCol = {
     position: 0, width: 2,
@@ -570,6 +619,11 @@ export function insertRepeatStart(block, colIdx) {
  */
 export function insertRepeatEnd(block, colIdx) {
   ensureColumns(block);
+  block._editCharPos = colIdx < block.columns.length
+    ? block.columns[colIdx].position
+    : (block.columns.length > 0
+      ? block.columns[block.columns.length - 1].position + block.columns[block.columns.length - 1].width
+      : 0);
 
   const repeatCol = {
     position: 0, width: 2,
@@ -612,6 +666,7 @@ export function removeBarline(block, colIdx) {
     return null;
   }
 
+  block._editCharPos = col.position;
   const savedType = col.type;
   block.columns.splice(colIdx, 1);
   syncStringsFromColumns(block);

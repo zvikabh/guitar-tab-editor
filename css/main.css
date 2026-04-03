@@ -329,6 +329,13 @@ body {
   color: #0d6efd;
 }
 
+.chord-table-tip {
+  font-size: 11px;
+  color: #888;
+  margin-top: 4px;
+  font-style: italic;
+}
+
 /* ===== Chord search dialog ===== */
 
 .chord-search-overlay {
@@ -410,6 +417,30 @@ body {
   white-space: nowrap;
   z-index: 100;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* ===== Copy toast ===== */
+
+.copy-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+  border-radius: 6px;
+  padding: 8px 20px;
+  font-size: 14px;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  animation: toast-fade 2s ease-in-out;
+}
+
+@keyframes toast-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* ===== Responsive ===== */
