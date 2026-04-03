@@ -17,7 +17,8 @@ import {
  * @returns {Object} Document
  */
 export function parseTabText(text) {
-  const rawLines = text.split('\n');
+  // Normalize line endings: strip \r (CRLF → LF)
+  const rawLines = text.replace(/\r/g, '').split('\n');
   // Remove trailing empty line that split() creates from trailing newline
   if (rawLines.length > 0 && rawLines[rawLines.length - 1] === '') {
     rawLines.pop();

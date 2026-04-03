@@ -204,6 +204,19 @@ class App {
     }
 
     const doc = parseTabText(result.text);
+
+    // Check if the file contains any tab rows
+    const hasTabRows = doc.blocks.some(b => b.type === 'tabrow');
+    if (!hasTabRows) {
+      alert(
+        `No guitar tab found in "${result.name}".\n\n` +
+        'The file was loaded as plain text. Possible reasons:\n' +
+        '• The file may not contain guitar tablature\n' +
+        '• Tab lines must have 6 consecutive string lines (e|, B|, G|, D|, A|, E|)\n' +
+        '• Windows line endings (CRLF) should be handled automatically — if this persists, try converting to Unix (LF) line endings'
+      );
+    }
+
     this.undoManager.clear();
     this.document = doc;
     this.editor.document = doc;
