@@ -2,7 +2,7 @@
  * Fingerpick Edit panel: chord table + custom chord textbox + mini string schematic.
  */
 
-import { CHORD_TABLE, CHORD_TABLE_COLUMNS, CHORD_DB, EXTENDED_CHORDS, lookupChord } from '../model/chords.js';
+import { CHORD_TABLE, CHORD_TABLE_COLUMNS, CHORD_DB, EXTENDED_CHORDS, lookupChord, identifyChord } from '../model/chords.js';
 
 const STRING_NAMES = ['e', 'B', 'G', 'D', 'A', 'E'];
 
@@ -337,31 +337,23 @@ export class FingerpickPanel {
       }
     }
 
-    // Reverse lookup BEFORE saving — find if the new voicing matches a known chord.
-    // Don't save back to the original DB entry (that would corrupt the standard voicing).
+    // Name the new voicing: prefer a known chord (so the table cell can be
+    // highlighted), otherwise work the name out from the notes themselves.
     const matchedName = this._reverseLookupChord(this.activeChord.frets);
+    const name = matchedName || identifyChord(this.activeChord.frets) || '?';
+    this.activeChord.name = name;
 
     // Refresh the diagram
     this._updateMiniDiagram();
 
     // Update name display and highlight
     const nameEl = this.containerEl.querySelector('#activeChordName');
-    this.containerEl.querySelectorAll('.chord-cell.active').forEach(el => el.classList.remove('active'));
+    if (nameEl) nameEl.textContent = name;
 
-    if (matchedName && matchedName !== this.activeChord.name) {
-      // Matches a different known chord
-      this.activeChord.name = matchedName;
-      if (nameEl) nameEl.textContent = matchedName;
+    this.containerEl.querySelectorAll('.chord-cell.active').forEach(el => el.classList.remove('active'));
+    if (matchedName) {
       const cell = this.containerEl.querySelector(`.chord-cell[data-chord="${matchedName}"]`);
       if (cell) cell.classList.add('active');
-    } else if (matchedName) {
-      // Still matches the same chord (e.g., toggled back to original)
-      if (nameEl) nameEl.textContent = matchedName;
-      const cell = this.containerEl.querySelector(`.chord-cell[data-chord="${matchedName}"]`);
-      if (cell) cell.classList.add('active');
-    } else {
-      // No match — show modified name
-      if (nameEl) nameEl.textContent = this.activeChord.name + '*';
     }
   }
 

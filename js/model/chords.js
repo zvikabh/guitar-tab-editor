@@ -376,7 +376,7 @@ const _generatedCache = {};
  * Returns { name, frets } or null.
  */
 function generateChordFromName(name) {
-  if (_generatedCache[name]) return { name, ..._generatedCache[name] };
+  if (_generatedCache[name]) return { name, frets: [..._generatedCache[name].frets] };
 
   const parsed = parseChordName(name);
   if (!parsed) return null;
@@ -385,7 +385,7 @@ function generateChordFromName(name) {
   if (!frets) return null;
 
   _generatedCache[name] = { frets };
-  return { name, frets };
+  return { name, frets: [...frets] };
 }
 
 /**
@@ -575,6 +575,7 @@ export const EXTENDED_CHORDS = {
 /**
  * Look up a chord by name. Searches CHORD_DB (table chords) first,
  * then EXTENDED_CHORDS. Accepts common aliases and normalizes flats.
+ * The returned frets array is a copy, so callers may edit a voicing freely.
  * @param {string} name
  * @returns {ChordVoicing|null}
  */
@@ -588,18 +589,18 @@ export function lookupChord(name) {
   const dbs = [CHORD_DB, EXTENDED_CHORDS];
 
   for (const db of dbs) {
-    if (db[n]) return { name: n, ...db[n] };
+    if (db[n]) return { name: n, frets: [...db[n].frets] };
   }
 
   // Try normalizing b → ♭
   const withFlat = n.replace(/([A-G])b(?!$)/g, (_, note) => note + '♭');
   for (const db of dbs) {
-    if (db[withFlat]) return { name: withFlat, ...db[withFlat] };
+    if (db[withFlat]) return { name: withFlat, frets: [...db[withFlat].frets] };
   }
 
   const withFlat2 = n.replace(/^([A-G])b(.*)$/, (_, note, rest) => note + '♭' + rest);
   for (const db of dbs) {
-    if (db[withFlat2]) return { name: withFlat2, ...db[withFlat2] };
+    if (db[withFlat2]) return { name: withFlat2, frets: [...db[withFlat2].frets] };
   }
 
   // Fall back to algorithmic generation
@@ -611,6 +612,151 @@ export function lookupChord(name) {
   if (genFlat) return genFlat;
 
   return null;
+}
+
+// ============================================================
+// Reverse identification: voicing → chord name
+// ============================================================
+
+/** Canonical name for each pitch class (matches the chord table's column headers). */
+const PITCH_CLASS_NAMES = [
+  'C', 'C#', 'D', 'E♭', 'E', 'F', 'F#', 'G', 'A♭', 'A', 'B♭', 'B',
+];
+
+/** Natural letters and their pitch classes, for spelling notes relative to a root. */
+const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const LETTER_PCS = [0, 2, 4, 5, 7, 9, 11];
+
+/** How many letter steps above the root each interval (0-11 semitones) spans. */
+const INTERVAL_LETTER_STEPS = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6];
+
+/**
+ * Chord formulas as semitone intervals above the root, in order of preference:
+ * earlier entries win when several formulas describe the same set of notes.
+ * Suffixes must be parseable by parseChordName() so identified names round-trip.
+ */
+const CHORD_FORMULAS = [
+  { suffix: '',        intervals: [0, 4, 7] },
+  { suffix: 'm',       intervals: [0, 3, 7] },
+  { suffix: '7',       intervals: [0, 4, 7, 10] },
+  { suffix: 'm7',      intervals: [0, 3, 7, 10] },
+  { suffix: 'maj7',    intervals: [0, 4, 7, 11] },
+  { suffix: '5',       intervals: [0, 7] },
+  { suffix: 'sus4',    intervals: [0, 5, 7] },
+  { suffix: 'sus2',    intervals: [0, 2, 7] },
+  { suffix: '6',       intervals: [0, 4, 7, 9] },
+  { suffix: 'm6',      intervals: [0, 3, 7, 9] },
+  { suffix: 'add9',    intervals: [0, 2, 4, 7] },
+  { suffix: 'madd9',   intervals: [0, 2, 3, 7] },
+  { suffix: 'dim',     intervals: [0, 3, 6] },
+  { suffix: 'aug',     intervals: [0, 4, 8] },
+  { suffix: 'm7b5',    intervals: [0, 3, 6, 10] },
+  { suffix: 'dim7',    intervals: [0, 3, 6, 9] },
+  { suffix: '7sus4',   intervals: [0, 5, 7, 10] },
+  { suffix: '7sus2',   intervals: [0, 2, 7, 10] },
+  { suffix: 'mmaj7',   intervals: [0, 3, 7, 11] },
+  { suffix: 'aug7',    intervals: [0, 4, 8, 10] },
+  { suffix: '7b5',     intervals: [0, 4, 6, 10] },
+  { suffix: 'maj7#5',  intervals: [0, 4, 8, 11] },
+  { suffix: '9',       intervals: [0, 2, 4, 7, 10] },
+  { suffix: 'm9',      intervals: [0, 2, 3, 7, 10] },
+  { suffix: 'maj9',    intervals: [0, 2, 4, 7, 11] },
+  { suffix: '6add9',   intervals: [0, 2, 4, 7, 9] },
+  { suffix: 'm6add9',  intervals: [0, 2, 3, 7, 9] },
+  { suffix: '7b9',     intervals: [0, 1, 4, 7, 10] },
+  { suffix: '7#9',     intervals: [0, 3, 4, 7, 10] },
+  { suffix: '9sus4',   intervals: [0, 2, 5, 7, 10] },
+  { suffix: 'add11',   intervals: [0, 4, 5, 7] },
+  { suffix: 'madd11',  intervals: [0, 3, 5, 7] },
+  { suffix: 'm11',     intervals: [0, 2, 3, 5, 7, 10] },
+  { suffix: '11',      intervals: [0, 2, 4, 5, 7, 10] },
+  { suffix: '13',      intervals: [0, 2, 4, 7, 9, 10] },
+  { suffix: 'm13',     intervals: [0, 2, 3, 7, 9, 10] },
+  { suffix: 'maj13',   intervals: [0, 2, 4, 7, 9, 11] },
+];
+
+/** Score penalties, added to the formula's index so lower is better. */
+const NO_FIFTH_PENALTY = 500; // voicing omits the formula's perfect fifth
+const SLASH_PENALTY = 60;     // root is not the lowest-sounding note
+
+function _sameNotes(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * Spell the note `interval` semitones above a root, using the letter name that
+ * music theory would give it (so E with a G# bass reads "E/G#", not "E/A♭").
+ * Falls back to the canonical name for awkward spellings (E#, C♭, double accidentals).
+ */
+function _spellNote(rootPc, rootName, interval) {
+  const targetPc = (rootPc + interval) % 12;
+  const rootLetterIdx = LETTERS.indexOf(rootName.charAt(0));
+  if (rootLetterIdx === -1) return PITCH_CLASS_NAMES[targetPc];
+
+  const letterIdx = (rootLetterIdx + INTERVAL_LETTER_STEPS[interval]) % 7;
+  const letter = LETTERS[letterIdx];
+  let acc = (targetPc - LETTER_PCS[letterIdx] + 12) % 12;
+  if (acc > 6) acc -= 12;
+
+  if (acc === 0) return letter;
+  if (acc === 1 && letter !== 'E' && letter !== 'B') return letter + '#';
+  if (acc === -1 && letter !== 'C' && letter !== 'F') return letter + '♭';
+  return PITCH_CLASS_NAMES[targetPc];
+}
+
+/**
+ * Identify the chord played by a guitar voicing, using music theory rather than
+ * a lookup table — so hand-edited voicings still get a name.
+ * @param {(number|null)[]} frets - [e, B, G, D, A, E] (high to low), null = not played
+ * @returns {string|null} Chord name (e.g. 'C/G', 'F#m7b5'), or null if unidentifiable.
+ */
+export function identifyChord(frets) {
+  if (!Array.isArray(frets)) return null;
+
+  // Sounding pitches, so the bass is the lowest note actually heard
+  const midi = [];
+  for (let s = 0; s < 6; s++) {
+    const f = frets[s];
+    if (f === null || f === undefined || isNaN(f)) continue;
+    midi.push(OPEN_STRINGS[s] + f);
+  }
+  if (midi.length < 2) return null;
+
+  const bassPc = Math.min(...midi) % 12;
+  const pcs = [...new Set(midi.map(m => m % 12))].sort((a, b) => a - b);
+  if (pcs.length < 2) return null; // unisons/octaves only — not a chord
+
+  let best = null;
+
+  for (const root of pcs) {
+    const relative = pcs.map(pc => (pc - root + 12) % 12).sort((a, b) => a - b);
+
+    for (let i = 0; i < CHORD_FORMULAS.length; i++) {
+      const { suffix, intervals } = CHORD_FORMULAS[i];
+
+      let score = null;
+      if (_sameNotes(relative, intervals)) {
+        score = i;
+      } else if (intervals.length >= 4 && intervals.includes(7) &&
+                 _sameNotes(relative, intervals.filter(v => v !== 7))) {
+        // Guitar voicings routinely drop the fifth from extended chords
+        score = i + NO_FIFTH_PENALTY;
+      }
+      if (score === null) continue;
+
+      const isSlash = root !== bassPc;
+      if (isSlash) score += SLASH_PENALTY;
+      if (best !== null && score >= best.score) continue;
+
+      const rootName = PITCH_CLASS_NAMES[root];
+      const bassInterval = (bassPc - root + 12) % 12;
+      const name = rootName + suffix +
+        (isSlash ? '/' + _spellNote(root, rootName, bassInterval) : '');
+      best = { score, name };
+    }
+  }
+
+  return best ? best.name : null;
 }
 
 /**
